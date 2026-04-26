@@ -1545,6 +1545,7 @@ _INDEX_HTML = r"""
   document.documentElement.setAttribute('data-theme', t);
 })();
 </script>
+<!-- v2: Bento UI -->
 
 <!-- Tiptap ESM (esm.sh - 공유 모듈 그래프, ?bundle 없이 ProseMirror 인스턴스 단일화) -->
 <script type="module">
@@ -1579,590 +1580,370 @@ _INDEX_HTML = r"""
 
 <style>
 /* ═══════════════════════════════════════════════
-   HARU STUDIO — CSS DESIGN SYSTEM
-   Naver Green Point Color + 3-Mode Theme
+   HARU STUDIO v2 — BENTO UI DESIGN SYSTEM
+   Glassmorphism · Adaptive Sheet · Lume Theme
    ═══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Pretendard:wght@300;400;500;600&display=swap');
 
-/* ── 네이버 그린 공통 팔레트 ── */
 :root {
   --naver-green:   #03C75A;
   --naver-green2:  #02a44c;
   --naver-greenbg: rgba(3,199,90,.10);
-
-  --green: #03C75A;
-  --amber: #f5a623;
-  --red:   #e05555;
-  --purple:#9b7de8;
-  --teal:  #03C75A;
-
+  --green: #03C75A; --amber: #f5a623; --red: #e05555; --purple: #9b7de8;
   --font-body: 'Pretendard', 'Apple SD Gothic Neo', sans-serif;
   --font-mono: 'DM Mono', 'Fira Code', monospace;
-  --radius: 8px;
-  --radius-lg: 14px;
-  --sidebar-w: 20%;
-  --right-w: 22%;
+  --radius: 8px; --radius-lg: 14px;
   --transition: 0.18s cubic-bezier(.4,0,.2,1);
   --persona-accent: var(--naver-green);
+  /* Lume 전환 속도 */
+  --ls: 0.38s; --le: cubic-bezier(.4,0,.2,1);
 }
 
-/* ════════════════════════════════
-   DARK MODE (기본)
-════════════════════════════════ */
-:root,
-[data-theme="dark"] {
-  --bg0:    #0d0f0e;
-  --bg1:    #131510;
-  --bg2:    #1a1e18;
-  --bg3:    #222620;
-  --bg4:    #2b302a;
-  --border: #2a3028;
-  --border2:#363e34;
-  --text0:  #e4ede6;
-  --text1:  #a0b0a4;
-  --text2:  #5e7062;
-  --accent: #03C75A;
-  --accent2:#02a44c;
+/* ═══ DARK (Framer-style neutral) ═══ */
+:root, [data-theme="dark"] {
+  --bg0:#080808; --bg1:#0e0e0e; --bg2:#151515; --bg3:#1c1c1c; --bg4:#242424;
+  --border:#1e1e1e; --border2:#2c2c2c;
+  --text0:#f0f0f0; --text1:#888; --text2:#444;
+  --accent:#03C75A; --accent2:#02a44c;
+  --card-rgb: 18,18,18; --card-a: 0.82;
+  --lume-glow: 0 0 0 1px rgba(255,255,255,.06), 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06);
+  --lume-border: rgba(255,255,255,.08);
+  /* Aurora spot colors */
+  --aurora-a: rgba(3,199,90,.12);
+  --aurora-b: rgba(0,229,255,.07);
+  --aurora-c: rgba(155,125,232,.07);
 }
-
-/* ════════════════════════════════
-   WHITE MODE
-════════════════════════════════ */
+/* ═══ WHITE ═══ */
 [data-theme="white"] {
-  --bg0:    #f5f7f5;
-  --bg1:    #ffffff;
-  --bg2:    #ffffff;
-  --bg3:    #f0f5f1;
-  --bg4:    #e4ede6;
-  --border: #d0ddd2;
-  --border2:#b0c4b4;
-  --text0:  #1a2a1e;
-  --text1:  #3d5442;
-  --text2:  #7a9a80;
-  --accent: #03C75A;
-  --accent2:#02a44c;
+  --bg0:#f5f5f5; --bg1:#fff; --bg2:#fafafa; --bg3:#f0f0f0; --bg4:#e8e8e8;
+  --border:#e0e0e0; --border2:#ccc;
+  --text0:#111; --text1:#555; --text2:#999;
+  --accent:#03C75A; --accent2:#02a44c;
+  --card-rgb: 255,255,255; --card-a: 0.92;
+  --lume-glow: 0 0 0 1px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,1);
+  --lume-border: rgba(0,0,0,.06);
+  --aurora-a: rgba(3,199,90,.06);
+  --aurora-b: rgba(0,180,200,.04);
+  --aurora-c: rgba(100,80,200,.04);
 }
-
-/* ════════════════════════════════
-   WARM MODE
-════════════════════════════════ */
+/* ═══ WARM ═══ */
 [data-theme="warm"] {
-  --bg0:    #16140f;
-  --bg1:    #1e1c14;
-  --bg2:    #26231a;
-  --bg3:    #2e2b20;
-  --bg4:    #383420;
-  --border: #3a3620;
-  --border2:#4a4630;
-  --text0:  #f0e8d0;
-  --text1:  #c0b090;
-  --text2:  #806848;
-  --accent: #03C75A;
-  --accent2:#02a44c;
+  --bg0:#0c0a06; --bg1:#141209; --bg2:#1c1a10; --bg3:#242118; --bg4:#2e2a1c;
+  --border:#2a2618; --border2:#3a3520;
+  --text0:#f5e8c8; --text1:#a08860; --text2:#604830;
+  --accent:#03C75A; --accent2:#02a44c;
+  --card-rgb: 20,18,9; --card-a: 0.85;
+  --lume-glow: 0 0 0 1px rgba(255,220,100,.05), 0 8px 32px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,220,100,.06);
+  --lume-border: rgba(255,210,80,.07);
+  --aurora-a: rgba(3,199,90,.1);
+  --aurora-b: rgba(255,180,50,.06);
+  --aurora-c: rgba(200,100,50,.05);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
-body {
-  font-family: var(--font-body);
-  font-size: 15px;
-  background: var(--bg0);
-  color: var(--text0);
-  line-height: 1.6;
+body { font-family: var(--font-body); font-size: 15px; background: var(--bg0); color: var(--text0); line-height: 1.6; }
+
+/* ══════════════════════════════════════════
+   AURORA BACKGROUND — 미세한 그라디언트 애니메이션
+   ══════════════════════════════════════════ */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 55% at 15% 35%, var(--aurora-a) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 45% at 85% 65%, var(--aurora-b) 0%, transparent 60%),
+    radial-gradient(ellipse 45% 55% at 50% 5%,  var(--aurora-c) 0%, transparent 55%);
+  background-size: 200% 200%;
+  animation: auroraShift 18s ease-in-out infinite;
+  transition: background var(--ls) var(--le);
+}
+@keyframes auroraShift {
+  0%, 100% { background-position: 0% 50%;   opacity: 1; }
+  33%       { background-position: 60% 20%;  opacity: .85; }
+  66%       { background-position: 100% 80%; opacity: 1; }
 }
 
-/* ══════════════════════════════
-   LAYOUT — IDE 2:6:2
-   ══════════════════════════════ */
+/* ══════════════════════════════════════════
+   NOISE TEXTURE — SVG fractalNoise overlay
+   ══════════════════════════════════════════ */
+.bento-card { position: relative; isolation: isolate; }
+.bento-card::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  pointer-events: none; z-index: 10;
+  opacity: .03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+[data-theme="dark"]  .bento-card::after { opacity: .045; }
+[data-theme="white"] .bento-card::after { opacity: .018; }
+[data-theme="warm"]  .bento-card::after { opacity: .04; }
+
+/* ══════════════════════════════════════════
+   BENTO GRID — 2컬럼 (좌: 전략패널 / 우: 에디터)
+   ══════════════════════════════════════════ */
 #app {
   display: grid;
-  grid-template-rows: 48px 1fr 160px;
-  grid-template-columns: var(--sidebar-w) 1fr var(--right-w);
+  grid-template-columns: clamp(260px, 28%, 340px) 1fr;
+  grid-template-rows: 48px 1fr 140px;
   grid-template-areas:
-    "topbar topbar topbar"
-    "left   center right"
-    "term   term   term";
+    "topbar topbar"
+    "left   center"
+    "term   term";
   height: 100dvh;
+  gap: 7px;
+  padding: 7px;
+  padding-top: 0;
+  background: var(--bg0);
+  transition: background var(--ls) var(--le);
+}
+
+/* ══════════════════════════════════════════
+   GLASSMORPHISM BENTO CARD
+   ══════════════════════════════════════════ */
+.bento-card {
+  background: rgba(var(--card-rgb), var(--card-a));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--lume-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lume-glow);
+  overflow: hidden;
+  /* Lume 전환 */
+  transition:
+    background var(--ls) var(--le),
+    border-color var(--ls) var(--le),
+    box-shadow var(--ls) var(--le);
+}
+/* Framer-style color glow on hover */
+@media (hover: hover) {
+  .bento-card:hover {
+    box-shadow:
+      0 0 0 1px rgba(3,199,90,.2),
+      0 8px 32px rgba(0,0,0,.6),
+      0 0 40px rgba(3,199,90,.06),
+      inset 0 1px 0 rgba(255,255,255,.08);
+  }
+}
+
+/* ══════════════════════════════════════════
+   TACTILE FEEDBACK — 버튼 물리적 수축
+   ══════════════════════════════════════════ */
+button:active:not(:disabled), .pill:active, .kw-card:active, .tab-btn:active {
+  transform: scale(0.95);
+}
+@media (hover: hover) {
+  .btn-sm:hover, .harvest-btn:hover {
+    box-shadow: 0 0 0 1px rgba(3,199,90,.3), 0 0 12px rgba(3,199,90,.12);
+  }
 }
 
 /* ── Topbar ── */
 #topbar {
   grid-area: topbar;
-  background: var(--bg1);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  gap: 12px;
-  z-index: 100;
+  background: rgba(var(--card-rgb), 0.97);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--lume-border);
+  display: flex; align-items: center;
+  padding: 0 14px; gap: 10px; z-index: 100;
+  transition: background var(--ls) var(--le), border-color var(--ls) var(--le);
 }
+/* Framer-style gradient logo */
 .logo {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-size: 15px;
-  color: var(--persona-accent);
-  letter-spacing: .08em;
-  flex-shrink: 0;
+  font-family: var(--font-mono); font-weight: 500; font-size: 15px;
+  letter-spacing: .08em; flex-shrink: 0;
+  background: linear-gradient(120deg, #03C75A 0%, #00e5ff 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-.logo span { color: var(--text2); font-size: 13px; margin-left: 6px; }
-#harvest-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  justify-content: flex-end;
-}
+.logo span { font-size: 13px; margin-left: 6px; opacity: .45; -webkit-text-fill-color: var(--text2); }
+#harvest-bar { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: flex-end; }
 .harvest-btn {
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  color: var(--text1);
-  padding: 5px 12px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  transition: all var(--transition);
-  white-space: nowrap;
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text1);
+  padding: 5px 12px; border-radius: var(--radius); font-size: 11px;
+  font-family: var(--font-mono); cursor: pointer;
+  transition: all var(--transition); white-space: nowrap;
 }
 .harvest-btn:hover { background: var(--bg4); color: var(--text0); border-color: var(--accent); }
 .harvest-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .harvest-btn.primary:hover { background: var(--accent2); }
-.harvest-btn:disabled { opacity: .4; cursor: not-allowed; }
-#revenue-score-bar {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--text2);
+.harvest-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none !important; }
+.harvest-btn.img-trigger {
+  background: rgba(3,199,90,.12); border-color: rgba(3,199,90,.3); color: var(--naver-green);
 }
-#revenue-score-bar .bar {
-  width: 80px; height: 4px; background: var(--border);
-  border-radius: 2px; overflow: hidden;
-}
-#revenue-score-bar .bar-fill {
-  height: 100%; background: var(--green); width: 0%;
-  transition: width .5s ease; border-radius: 2px;
-}
-.badge-high { background: var(--amber); color: #000; font-size: 10px;
-  padding: 2px 7px; border-radius: 20px; font-weight: 600; }
+.harvest-btn.img-trigger:hover { background: rgba(3,199,90,.22); border-color: var(--naver-green); }
+#revenue-score-bar { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text2); }
+#revenue-score-bar .bar { width: 80px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+#revenue-score-bar .bar-fill { height: 100%; background: var(--green); width: 0%; transition: width .5s ease; border-radius: 2px; }
+.badge-high { background: var(--amber); color: #000; font-size: 10px; padding: 2px 7px; border-radius: 20px; font-weight: 600; }
 
-/* ── Left Sidebar ── */
+/* ── Left Sidebar (bento-card) ── */
 #left {
   grid-area: left;
-  background: var(--bg1);
-  border-right: 1px solid var(--border);
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: flex; flex-direction: column; gap: 0;
 }
 .panel-section {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lume-border);
   padding: 14px 14px 10px;
+  transition: border-color var(--ls) var(--le);
 }
 .section-title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: .1em;
-  color: var(--text2);
-  text-transform: uppercase;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+  letter-spacing: .1em; color: var(--text2); text-transform: uppercase;
+  margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
 }
 .section-title .dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: var(--persona-accent); flex-shrink: 0;
-  margin-right: 6px; display: inline-block;
+  background: var(--persona-accent); flex-shrink: 0; margin-right: 6px; display: inline-block;
+  box-shadow: 0 0 8px rgba(3,199,90,.6);
 }
 
 /* ── Persona Card ── */
 #persona-badge {
-  background: var(--bg2);
-  border: 1px solid var(--border2);
+  background: var(--bg2); border: 1px solid var(--border2);
   border-left: 3px solid var(--persona-accent);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  cursor: pointer;
-  transition: border-color var(--transition);
+  border-radius: var(--radius); padding: 10px 12px;
+  cursor: pointer; transition: all var(--transition);
 }
-#persona-badge:hover { border-color: var(--persona-accent); }
+#persona-badge:hover { border-color: var(--persona-accent); box-shadow: 0 0 0 2px rgba(3,199,90,.15); }
 #persona-badge .name { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
 #persona-badge .meta { font-size: 13px; color: var(--text2); }
 #persona-setup { display: none; flex-direction: column; gap: 8px; }
 .field-label { font-size: 13px; color: var(--text2); margin-bottom: 3px; }
 .field-input {
-  width: 100%;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 14px;
-  color: var(--text0);
-  font-family: var(--font-body);
-  resize: none;
-  transition: border-color var(--transition);
+  width: 100%; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 10px; font-size: 14px; color: var(--text0);
+  font-family: var(--font-body); resize: none; transition: border-color var(--transition);
 }
 .field-input:focus { outline: none; border-color: var(--persona-accent); }
 .color-pickers { display: flex; gap: 6px; flex-wrap: wrap; }
 .color-chip {
   width: 22px; height: 22px; border-radius: 50%;
   cursor: pointer; border: 2px solid transparent;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), transform var(--transition);
 }
+.color-chip:hover { transform: scale(1.15); }
 .color-chip.active { border-color: var(--text0); }
 
 /* ── Keyword Panel ── */
 .tab-group { display: flex; gap: 4px; margin-bottom: 10px; }
 .tab-btn {
-  flex: 1;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  padding: 5px 4px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text2);
-  cursor: pointer;
+  flex: 1; font-size: 12px; font-family: var(--font-mono); padding: 5px 4px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text2); cursor: pointer; text-align: center;
   transition: all var(--transition);
-  text-align: center;
 }
 .tab-btn.active { background: var(--bg4); color: var(--persona-accent); border-color: var(--persona-accent); }
-
 #keyword-input-row { display: flex; gap: 6px; }
 #seed-keyword {
-  flex: 1;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 9px;
-  font-size: 12px;
-  color: var(--text0);
-  font-family: var(--font-body);
+  flex: 1; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 9px; font-size: 12px;
+  color: var(--text0); font-family: var(--font-body);
 }
 #seed-keyword:focus { outline: none; border-color: var(--persona-accent); }
 
 .btn-sm {
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  color: var(--text1);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--transition);
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text1);
+  padding: 6px 10px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; white-space: nowrap; transition: all var(--transition);
 }
 .btn-sm:hover { background: var(--bg4); color: var(--text0); }
-.btn-accent {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
+.btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-accent:hover { background: var(--accent2); }
 
 .keyword-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: 8px;
-  max-height: 260px;
-  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 5px;
+  margin-top: 8px; max-height: 240px; overflow-y: auto;
 }
 .kw-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  cursor: pointer;
-  transition: all var(--transition);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; cursor: pointer; transition: all var(--transition);
+  display: flex; align-items: center; gap: 8px;
 }
 .kw-card:hover { border-color: var(--persona-accent); background: var(--bg3); }
 .kw-card.selected { border-color: var(--persona-accent); background: var(--bg3); }
 .kw-card.excluded { opacity: .4; cursor: not-allowed; }
 .kw-text { flex: 1; font-size: 14px; font-weight: 500; }
-.kw-score {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 2px 7px;
-  border-radius: 20px;
-  background: var(--bg4);
-  color: var(--text2);
-}
+.kw-score { font-family: var(--font-mono); font-size: 12px; padding: 2px 7px; border-radius: 20px; background: var(--bg4); color: var(--text2); }
 .kw-score.high { background: rgba(93,200,136,.15); color: var(--green); }
 .kw-score.medium { background: rgba(245,166,35,.12); color: var(--amber); }
 
 /* ── Write Config ── */
 .select-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .pill {
-  font-size: 12px;
-  padding: 4px 9px;
-  border-radius: 20px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  color: var(--text2);
-  cursor: pointer;
-  transition: all var(--transition);
+  font-size: 12px; padding: 4px 9px; border-radius: 20px;
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--text2); cursor: pointer; transition: all var(--transition);
 }
 .pill:hover { border-color: var(--text1); color: var(--text1); }
 .pill.active { background: var(--persona-accent); border-color: var(--persona-accent); color: #000; font-weight: 600; }
-
-.toggle-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 0;
-}
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
 .toggle-label { font-size: 13px; color: var(--text1); }
-.toggle {
-  position: relative; width: 34px; height: 18px; cursor: pointer;
-  background: var(--border); border-radius: 9px; transition: background .2s;
-}
+.toggle { position: relative; width: 34px; height: 18px; cursor: pointer; background: var(--border); border-radius: 9px; transition: background .2s; }
 .toggle.on { background: var(--persona-accent); }
-.toggle-knob {
-  position: absolute; top: 2px; left: 2px;
-  width: 14px; height: 14px; border-radius: 50%; background: #fff;
-  transition: transform .2s;
-}
+.toggle-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .toggle.on .toggle-knob { transform: translateX(16px); }
 
-/* ── Center Editor ── */
+/* ── Center Editor (bento-card) ── */
 #center {
   grid-area: center;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg0);
+  background: transparent;
 }
 #editor-toolbar {
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 6px 16px;
-  gap: 4px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
+  background: rgba(var(--card-rgb), 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--lume-border);
+  display: flex; align-items: center;
+  padding: 6px 16px; gap: 4px; flex-wrap: wrap; flex-shrink: 0;
+  transition: background var(--ls) var(--le);
 }
 .tb-btn {
-  background: transparent;
-  border: none;
-  color: var(--text2);
-  padding: 5px 8px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all var(--transition);
-  font-family: var(--font-body);
+  background: transparent; border: none; color: var(--text2);
+  padding: 5px 8px; border-radius: 5px; cursor: pointer;
+  font-size: 13px; transition: all var(--transition); font-family: var(--font-body);
 }
 .tb-btn:hover { background: var(--bg3); color: var(--text0); }
 .tb-btn.active { background: var(--bg4); color: var(--persona-accent); }
 .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 .tb-right { margin-left: auto; display: flex; gap: 4px; }
-
-#editor-wrapper {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px;
-  max-width: 800px;
-  margin: 0 auto;
-  width: 100%;
-}
-.ProseMirror {
-  outline: none;
-  color: var(--text0);
-  font-family: var(--font-body);
-  font-size: 14.5px;
-  line-height: 1.8;
-  min-height: 400px;
-}
-.ProseMirror h1 { font-size: 22px; font-weight: 600; margin: 24px 0 12px; color: var(--text0); }
-.ProseMirror h2 { font-size: 18px; font-weight: 600; margin: 20px 0 10px; color: var(--text0); }
-.ProseMirror h3 { font-size: 15px; font-weight: 600; margin: 16px 0 8px; color: var(--text0); }
+#editor-wrapper { flex: 1; overflow-y: auto; padding: 32px; max-width: 780px; margin: 0 auto; width: 100%; }
+.ProseMirror { outline: none; color: var(--text0); font-family: var(--font-body); font-size: 14.5px; line-height: 1.8; min-height: 400px; }
+.ProseMirror h1 { font-size: 22px; font-weight: 600; margin: 24px 0 12px; }
+.ProseMirror h2 { font-size: 18px; font-weight: 600; margin: 20px 0 10px; }
+.ProseMirror h3 { font-size: 15px; font-weight: 600; margin: 16px 0 8px; }
 .ProseMirror p { margin: 0 0 14px; }
 .ProseMirror a { color: var(--accent); text-decoration: underline; }
 .ProseMirror img { max-width: 100%; border-radius: var(--radius); margin: 12px 0; }
 .ProseMirror ul, .ProseMirror ol { padding-left: 20px; margin: 0 0 14px; }
-.ProseMirror blockquote {
-  border-left: 3px solid var(--persona-accent);
-  padding-left: 16px;
-  margin: 16px 0;
-  color: var(--text1);
-  font-style: italic;
-}
-/* AI 금지어 하이라이트 */
-.ProseMirror mark { background: rgba(240, 85, 85, .18); color: var(--red); border-radius: 2px; }
-
-/* 스트리밍 커서 */
-.stream-cursor::after {
-  content: "▋"; animation: blink .7s infinite;
-  color: var(--persona-accent); font-weight: 300;
-}
+.ProseMirror blockquote { border-left: 3px solid var(--persona-accent); padding-left: 16px; margin: 16px 0; color: var(--text1); font-style: italic; }
+.ProseMirror mark { background: rgba(240,85,85,.18); color: var(--red); border-radius: 2px; }
+.stream-cursor::after { content: "▋"; animation: blink .7s infinite; color: var(--persona-accent); }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-/* 스켈레톤 이미지 */
-.img-skeleton {
-  width: 100%; height: 200px;
-  background: linear-gradient(90deg, var(--bg2) 25%, var(--bg3) 50%, var(--bg2) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: var(--radius);
-  margin: 12px 0;
-}
+.img-skeleton { width: 100%; height: 200px; background: linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 50%,var(--bg2) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--radius); margin: 12px 0; }
 @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-/* ── Right Panel ── */
-#right {
-  grid-area: right;
-  background: var(--bg1);
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.img-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; }
-.gallery-img {
-  aspect-ratio: 16/9;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 2px solid transparent;
-  cursor: pointer;
-  transition: all var(--transition);
-  background: var(--bg3);
-}
-.gallery-img:hover { border-color: var(--persona-accent); transform: scale(1.03); }
-.gallery-skeleton {
-  aspect-ratio: 16/9;
-  background: linear-gradient(90deg, var(--bg2) 25%, var(--bg3) 50%, var(--bg2) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 6px;
-}
-.img-insert-btn {
-  width: 100%;
-  background: var(--bg3);
-  border: 1px dashed var(--border2);
-  color: var(--text2);
-  padding: 6px;
-  border-radius: 5px;
-  font-size: 10px;
-  cursor: pointer;
-  margin-top: 4px;
-  transition: all var(--transition);
-}
-.img-insert-btn:hover { border-color: var(--persona-accent); color: var(--persona-accent); }
-
-/* ── 스마트 이미지 대시보드 ── */
-.img-filter-btn {
-  flex: 1; padding: 4px 0; font-size: 12px;
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text2);
-  cursor: pointer; transition: all var(--transition);
-  font-family: var(--font-mono);
-}
-.img-filter-btn.active {
-  background: var(--naver-greenbg); color: var(--naver-green);
-  border-color: var(--naver-green);
-}
-.dash-img-card {
-  position: relative; border-radius: var(--radius);
-  overflow: hidden; background: var(--bg3);
-  border: 1px solid var(--border);
-  transition: border-color var(--transition);
-}
-.dash-img-card:hover { border-color: var(--naver-green); }
-.dash-img-card img {
-  width: 100%; height: 90px; object-fit: cover;
-  display: block; cursor: pointer;
-}
-.dash-img-card img:hover { opacity: .85; }
-.dash-img-actions {
-  display: flex; gap: 4px; padding: 5px 5px 6px;
-}
-.dash-act-btn {
-  flex: 1; padding: 4px 0; font-size: 11px;
-  border: 1px solid var(--border2); border-radius: 5px;
-  cursor: pointer; transition: all var(--transition);
-  font-family: var(--font-body); white-space: nowrap;
-}
-.dash-act-btn.copy  { background: var(--naver-greenbg); color: var(--naver-green); border-color: var(--naver-green); }
-.dash-act-btn.copy:hover  { background: var(--naver-green); color: #fff; }
-.dash-act-btn.insert { background: var(--bg4); color: var(--text1); }
-.dash-act-btn.insert:hover { background: var(--bg2); color: var(--text0); }
-.dash-img-cat {
-  position: absolute; top: 5px; left: 5px;
-  font-size: 9px; padding: 2px 5px; border-radius: 4px;
-  font-family: var(--font-mono); font-weight: 600;
-  background: rgba(0,0,0,.55); color: #fff;
-}
-.dash-img-card.copying::after {
-  content: '✓'; position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(3,199,90,.7); color: #fff;
-  font-size: 28px; font-weight: 700;
-}
-
-.inline-img-gen {
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.img-prompt-row { display: flex; gap: 6px; margin-top: 6px; }
-#img-prompt-input {
-  flex: 1;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 9px;
-  font-size: 11px;
-  color: var(--text0);
-}
-#img-prompt-input:focus { outline: none; border-color: var(--persona-accent); }
-
-.shop-kw-list { padding: 10px; display: flex; flex-direction: column; gap: 5px; }
-.shop-kw-item {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 11px;
-  display: flex; align-items: center; gap: 8px;
-}
-.shop-kw-item .funnel { font-size: 11px; color: var(--text2); width: 40px; flex-shrink: 0; }
-.target-product {
-  background: rgba(93,141,238,.1);
-  border: 1px solid rgba(93,141,238,.3);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  margin: 0 10px;
-  font-size: 13px;
-  color: var(--accent);
-}
-
-/* ── Terminal ── */
+/* ── Terminal (bento-card) ── */
 #terminal {
   grid-area: term;
-  background: #070809;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: rgba(5,5,5,.96);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.05); border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.04), inset 0 1px 0 rgba(255,255,255,.04);
+  transition: border-color var(--ls) var(--le);
 }
-#term-header {
-  display: flex; align-items: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  gap: 8px;
-  flex-shrink: 0;
-}
+#term-header { display: flex; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--border); gap: 8px; flex-shrink: 0; }
 .term-dot { width: 8px; height: 8px; border-radius: 50%; }
-#term-log {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 14px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.7;
-}
+#term-log { flex: 1; overflow-y: auto; padding: 8px 14px; font-family: var(--font-mono); font-size: 13px; line-height: 1.7; }
 .log-line { display: flex; gap: 10px; }
 .log-ts { color: #3d4260; width: 80px; flex-shrink: 0; }
 .log-step { color: var(--purple); width: 80px; flex-shrink: 0; }
@@ -2170,181 +1951,207 @@ body {
 .log-msg.done { color: var(--green); }
 .log-msg.error { color: var(--red); }
 .log-msg.warn { color: var(--amber); }
-#progress-bar {
-  height: 3px; background: var(--border);
-  flex-shrink: 0;
+#progress-bar { height: 3px; background: var(--border); flex-shrink: 0; }
+#progress-fill { height: 100%; width: 0%; background: var(--persona-accent); transition: width .4s ease; }
+
+/* ══════════════════════════════════════════
+   ADAPTIVE SHEET / DRAWER SYSTEM
+   ══════════════════════════════════════════ */
+.drawer-backdrop {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.45); z-index: 498;
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: backdropIn .2s ease forwards;
 }
-#progress-fill {
-  height: 100%; width: 0%;
-  background: var(--persona-accent);
-  transition: width .4s ease;
+.drawer-backdrop.show { display: block; }
+@keyframes backdropIn { from{opacity:0} to{opacity:1} }
+
+/* PC: 우측 슬라이드인 */
+.side-drawer {
+  position: fixed; top: 0; right: -480px;
+  width: 420px; height: 100vh;
+  background: rgba(var(--card-rgb), 0.97);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-left: 1px solid var(--lume-border);
+  z-index: 500; overflow-y: auto; padding: 0;
+  transition:
+    right .32s cubic-bezier(.4,0,.2,1),
+    background var(--ls) var(--le),
+    border-color var(--ls) var(--le);
+  box-shadow: -8px 0 40px rgba(0,0,0,.3);
+}
+.side-drawer.open { right: 0; }
+
+.drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px 16px; border-bottom: 1px solid var(--lume-border);
+  flex-shrink: 0; position: sticky; top: 0;
+  background: rgba(var(--card-rgb), 0.99);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 1;
+  transition: background var(--ls) var(--le);
+}
+.drawer-title {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 500;
+  letter-spacing: .1em; color: var(--text2); text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
+}
+.drawer-title::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--persona-accent); }
+.drawer-close-btn {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text2);
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.drawer-close-btn:hover { background: var(--bg4); color: var(--text0); }
+.drawer-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+/* 이미지 갤러리 */
+.img-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 0; }
+.gallery-img { aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: all var(--transition); background: var(--bg3); width: 100%; }
+.gallery-img:hover { border-color: var(--persona-accent); transform: scale(1.03); }
+.gallery-skeleton { aspect-ratio: 16/9; background: linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 50%,var(--bg2) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+.img-insert-btn { width: 100%; background: var(--bg3); border: 1px dashed var(--border2); color: var(--text2); padding: 6px; border-radius: 5px; font-size: 10px; cursor: pointer; margin-top: 4px; transition: all var(--transition); }
+.img-insert-btn:hover { border-color: var(--persona-accent); color: var(--persona-accent); }
+
+/* 이미지 대시보드 */
+.img-filter-btn { flex: 1; padding: 4px 0; font-size: 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text2); cursor: pointer; transition: all var(--transition); font-family: var(--font-mono); }
+.img-filter-btn.active { background: var(--naver-greenbg); color: var(--naver-green); border-color: var(--naver-green); }
+.dash-img-card { position: relative; border-radius: var(--radius); overflow: hidden; background: var(--bg3); border: 1px solid var(--border); transition: border-color var(--transition); }
+.dash-img-card:hover { border-color: var(--naver-green); }
+.dash-img-card img { width: 100%; height: 90px; object-fit: cover; display: block; cursor: pointer; }
+.dash-img-card img:hover { opacity: .85; }
+.dash-img-actions { display: flex; gap: 4px; padding: 5px 5px 6px; }
+.dash-act-btn { flex: 1; padding: 4px 0; font-size: 11px; border: 1px solid var(--border2); border-radius: 5px; cursor: pointer; transition: all var(--transition); font-family: var(--font-body); white-space: nowrap; }
+.dash-act-btn.copy { background: var(--naver-greenbg); color: var(--naver-green); border-color: var(--naver-green); }
+.dash-act-btn.copy:hover { background: var(--naver-green); color: #fff; }
+.dash-act-btn.insert { background: var(--bg4); color: var(--text1); }
+.dash-act-btn.insert:hover { background: var(--bg2); color: var(--text0); }
+.dash-img-cat { position: absolute; top: 5px; left: 5px; font-size: 9px; padding: 2px 5px; border-radius: 4px; font-family: var(--font-mono); font-weight: 600; background: rgba(0,0,0,.55); color: #fff; }
+.dash-img-card.copying::after { content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,199,90,.7); color: #fff; font-size: 28px; font-weight: 700; }
+
+.img-prompt-row { display: flex; gap: 6px; margin-top: 6px; }
+#img-prompt-input { flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 11px; color: var(--text0); }
+#img-prompt-input:focus { outline: none; border-color: var(--persona-accent); }
+
+.shop-kw-list { display: flex; flex-direction: column; gap: 5px; }
+.shop-kw-item { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+.shop-kw-item .funnel { font-size: 11px; color: var(--text2); width: 40px; flex-shrink: 0; }
+.target-product {
+  background: rgba(93,141,238,.1);
+  border: 1px solid rgba(93,141,238,.3);
+  border-radius: var(--radius);
+  padding: 10px 12px; margin-bottom: 8px;
+  font-size: 13px; color: var(--accent);
 }
 
 /* ── Harvest Guard Modal ── */
-#harvest-modal {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.7);
-  z-index: 9999;
-  align-items: center;
-  justify-content: center;
-}
+#harvest-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 9999; align-items: center; justify-content: center; }
 #harvest-modal.open { display: flex; }
 .modal-box {
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-lg);
-  padding: 28px;
-  width: 90%;
-  max-width: 380px;
-  box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  background: rgba(var(--card-rgb), 0.98); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--lume-border); border-radius: var(--radius-lg); padding: 28px;
+  width: 90%; max-width: 380px; box-shadow: 0 24px 60px rgba(0,0,0,.5);
 }
 .modal-box h3 { font-size: 15px; margin-bottom: 16px; font-weight: 600; }
-.check-item {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 8px 0; border-bottom: 1px solid var(--border);
-  cursor: pointer;
-}
+.check-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
 .check-item:last-of-type { border-bottom: none; }
-.check-box {
-  width: 16px; height: 16px; border-radius: 4px;
-  border: 1.5px solid var(--border2); flex-shrink: 0;
-  margin-top: 2px; display: flex; align-items: center; justify-content: center;
-  transition: all var(--transition);
-}
-.check-item.checked .check-box {
-  background: var(--persona-accent);
-  border-color: var(--persona-accent);
-}
+.check-box { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--border2); flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
+.check-item.checked .check-box { background: var(--persona-accent); border-color: var(--persona-accent); }
 .check-item.checked .check-box::after { content: "✓"; font-size: 11px; color: #000; }
 .check-text { font-size: 14px; color: var(--text1); }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
 
-/* ── Persona Slide-over ── */
-#persona-slideover {
-  position: fixed; top: 0; left: -360px; height: 100vh;
-  width: 340px; background: var(--bg1);
-  border-right: 1px solid var(--border2);
-  z-index: 500;
-  padding: 24px;
-  overflow-y: auto;
-  transition: left .3s cubic-bezier(.4,0,.2,1);
-  box-shadow: 12px 0 40px rgba(0,0,0,.4);
-}
-#persona-slideover.open { left: 0; }
-#persona-slideover h3 { font-size: 15px; margin-bottom: 20px; font-weight: 600; }
-
 /* ── Generate Button ── */
 #gen-btn {
-  background: var(--persona-accent);
-  border: none;
-  color: #000;
-  font-weight: 700;
-  font-size: 14px;
-  font-family: var(--font-mono);
-  padding: 10px 16px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  width: 100%;
-  margin-top: 12px;
-  letter-spacing: .04em;
+  background: var(--persona-accent); border: none; color: #000;
+  font-weight: 700; font-size: 14px; font-family: var(--font-mono);
+  padding: 10px 16px; border-radius: var(--radius); cursor: pointer;
+  width: 100%; margin-top: 12px; letter-spacing: .04em;
   transition: all var(--transition);
   display: flex; align-items: center; justify-content: center; gap: 8px;
 }
-#gen-btn:hover { filter: brightness(1.1); }
-#gen-btn:disabled { opacity: .5; cursor: not-allowed; filter: none; }
-#gen-btn .spinner {
-  width: 14px; height: 14px; border: 2px solid rgba(0,0,0,.3);
-  border-top-color: #000; border-radius: 50%;
-  animation: spin .7s linear infinite; display: none;
-}
+#gen-btn:hover { filter: brightness(1.08); box-shadow: 0 0 0 1px rgba(3,199,90,.5), 0 0 24px rgba(3,199,90,.35); }
+#gen-btn:disabled { opacity: .5; cursor: not-allowed; filter: none; box-shadow: none; }
+#gen-btn .spinner { width: 14px; height: 14px; border: 2px solid rgba(0,0,0,.3); border-top-color: #000; border-radius: 50%; animation: spin .7s linear infinite; display: none; }
 #gen-btn.loading .spinner { display: block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── Revenue Link Input ── */
+/* Revenue Link */
 .revenue-link-row { display: flex; gap: 6px; margin-top: 6px; }
-#revenue-link-input {
-  flex: 1;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 9px;
-  font-size: 11px;
-  color: var(--text0);
-}
+#revenue-link-input { flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 11px; color: var(--text0); }
 #revenue-link-input:focus { outline: none; border-color: var(--amber); }
 .link-armed { border-color: var(--amber) !important; }
 
-/* ── Post History ── */
-.post-history-item {
-  display: flex; gap: 6px; align-items: center;
-  padding: 4px 0;
-}
-.post-title-input {
-  flex: 2;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 7px;
-  font-size: 11px;
-  color: var(--text0);
-}
-.post-url-input {
-  flex: 3;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 7px;
-  font-size: 13px;
-  color: var(--text0);
-}
+/* Post History */
+.post-history-item { display: flex; gap: 6px; align-items: center; padding: 4px 0; }
+.post-title-input { flex: 2; background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; font-size: 11px; color: var(--text0); }
+.post-url-input { flex: 3; background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; font-size: 13px; color: var(--text0); }
 .post-title-input:focus, .post-url-input:focus { outline: none; border-color: var(--accent); }
 
-/* ── Responsive Mobile (탭 전환) ── */
+/* ═══════════════════════════════════════
+   RESPONSIVE MOBILE — Bottom Sheet 전환
+   ═══════════════════════════════════════ */
 @media (max-width: 768px) {
   #app {
-    grid-template-areas:
-      "topbar"
-      "mobile-content"
-      "term";
     grid-template-columns: 1fr;
-    grid-template-rows: 48px 1fr 120px;
-    padding-bottom: 50px; /* 탭 바 공간 확보 */
+    grid-template-rows: 48px 1fr 80px;
+    grid-template-areas: "topbar" "center" "term";
+    gap: 0; padding: 0; padding-bottom: 50px;
   }
-  #left, #center, #right { display: none; }
-  #center { grid-area: mobile-content; }
-  #mobile-tab-active { display: flex !important; }
-  .mobile-tabs {
-    display: flex !important;
+  /* 전략 패널 → Bottom Sheet */
+  #left {
+    position: fixed !important;
+    bottom: -92vh !important; top: auto !important;
+    left: 0; right: 0; width: 100% !important;
+    height: 90vh; z-index: 499;
+    border-radius: 20px 20px 0 0 !important;
+    border: 1px solid var(--lume-border); border-bottom: none !important;
+    transition: bottom .35s cubic-bezier(.4,0,.2,1), background var(--ls) var(--le) !important;
+    overflow-y: auto; padding-bottom: 60px;
   }
+  #left.mobile-open { bottom: 0 !important; }
+  #left::before { content: ''; display: block; width: 40px; height: 4px; background: var(--border2); border-radius: 2px; margin: 14px auto 4px; }
+  /* Image drawer → Bottom Sheet */
+  .side-drawer {
+    top: auto; right: 0; left: 0; bottom: -92vh;
+    width: 100%; height: 88vh;
+    border-left: none; border-top: 1px solid var(--lume-border);
+    border-radius: 20px 20px 0 0;
+    transition: bottom .35s cubic-bezier(.4,0,.2,1), background var(--ls) var(--le);
+    box-shadow: 0 -8px 40px rgba(0,0,0,.35);
+  }
+  .side-drawer.open { bottom: 0; right: 0; }
+  .side-drawer .drawer-header { padding-top: 28px; }
+  .side-drawer .drawer-header::before { content: ''; display: block; width: 40px; height: 4px; background: var(--border2); border-radius: 2px; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); }
+  #center { grid-area: center; border-radius: 0; }
+  #terminal { border-radius: 0; }
   .logo span { display: none; }
-  #harvest-bar .harvest-btn { font-size: 11px; padding: 4px 6px; }
-  .panel-section { padding: 16px; }
+  #harvest-bar .harvest-btn { font-size: 10px; padding: 4px 7px; }
+  #revenue-score-bar { display: none; }
+  #editor-wrapper { padding: 20px 16px; }
 }
+
+/* ── Mobile Tab Bar ── */
 .mobile-tabs {
   display: none;
-  background: rgba(34,34,36, 0.9);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--border);
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  z-index: 200;
-  height: 50px;
-  box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
+  background: rgba(var(--card-rgb), 0.97);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--lume-border);
+  position: fixed; bottom: 0; left: 0; right: 0;
+  z-index: 200; height: 50px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,.2);
+  transition: background var(--ls) var(--le);
 }
+@media (max-width: 768px) { .mobile-tabs { display: flex; } }
 .mobile-tab {
-  flex: 1; padding: 12px 10px; text-align: center;
-  font-size: 13px; color: var(--text2); cursor: pointer;
+  flex: 1; padding: 8px 6px; text-align: center;
+  color: var(--text2); cursor: pointer;
   border-top: 2px solid transparent;
-  transition: all 0.2s;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 500;
+  flex-direction: column; gap: 2px; transition: all .2s;
 }
-.mobile-tab.active { 
-  color: var(--persona-accent); 
-  border-top: 2px solid var(--persona-accent);
-  background: linear-gradient(to bottom, rgba(255,255,255,0.05), transparent);
-}
+.mobile-tab .tab-icon { font-size: 17px; line-height: 1; }
+.mobile-tab .tab-label { font-size: 10px; font-weight: 500; }
+.mobile-tab.active { color: var(--persona-accent); border-top-color: var(--persona-accent); }
 
 /* 스크롤바 */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -2428,11 +2235,19 @@ body {
 </div>
 
 <!-- ════════════════════════════════════════
-     PERSONA SLIDE-OVER
+     DRAWER BACKDROP (공통)
 ════════════════════════════════════════ -->
-<div id="persona-slideover">
-  <h3>페르소나 수정</h3>
-  <div style="display:flex;flex-direction:column;gap:12px;">
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+
+<!-- ════════════════════════════════════════
+     PERSONA DRAWER (우측 슬라이드 / 모바일 Bottom Sheet)
+════════════════════════════════════════ -->
+<div class="side-drawer" id="persona-drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">페르소나 수정</span>
+    <button class="drawer-close-btn" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
     <div>
       <div class="field-label">직업</div>
       <input class="field-input" id="so-job" placeholder="페르소나에 사용할 직업을 입력하세요"/>
@@ -2461,31 +2276,154 @@ body {
       </div>
     </div>
     <button class="btn-sm btn-accent" onclick="savePersonaFromSlideover()" style="margin-top:4px">저장</button>
-    <button class="btn-sm" onclick="closeSlideover()">닫기</button>
+    <button class="btn-sm" onclick="closeDrawer()">닫기</button>
   </div>
 </div>
 
 <!-- ════════════════════════════════════════
-     MAIN APP
+     IMAGE DRAWER (우측 슬라이드 / 모바일 Bottom Sheet)
+     — 기존 #right 패널 내용 전체 이동
+════════════════════════════════════════ -->
+<div class="side-drawer" id="image-drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">이미지 & 에셋</span>
+    <button class="drawer-close-btn" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+
+    <!-- AI 이미지 생성 트리거 -->
+    <div>
+      <div class="section-title" style="margin-bottom:10px"><span><span class="dot"></span>IMAGE ASSETS</span></div>
+      <button id="img-gen-trigger-btn" onclick="triggerImageGeneration()"
+        style="width:100%;background:var(--naver-green);border:none;color:#fff;font-weight:700;
+               font-size:14px;padding:11px 16px;border-radius:var(--radius);cursor:pointer;
+               display:flex;align-items:center;justify-content:center;gap:8px;
+               font-family:var(--font-mono);transition:all var(--transition);margin-bottom:6px"
+        disabled>
+        <span id="img-btn-icon">🎨</span>
+        <span id="img-btn-label">AI 이미지 생성</span>
+        <div id="img-btn-spinner" class="spinner" style="display:none;width:14px;height:14px;
+          border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;
+          animation:spin .7s linear infinite"></div>
+      </button>
+      <p id="img-gen-hint" style="font-size:12px;color:var(--text2);text-align:center;margin:0 0 6px">원고 생성 후 활성화됩니다</p>
+      <button id="img-retry-btn" onclick="triggerImageGeneration()" style="display:none;
+        width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--amber);
+        font-size:12px;padding:7px;border-radius:var(--radius);cursor:pointer;margin-bottom:6px">
+        ↻ 이미지 다시 생성
+      </button>
+      <div class="field-label" style="margin-top:4px">추가 프롬프트 (선택)</div>
+      <div class="img-prompt-row">
+        <input id="img-prompt-input" class="field-input" placeholder="이미지 설명 입력..." style="font-size:13px;padding:7px 9px"/>
+      </div>
+    </div>
+
+    <!-- 썸네일 갤러리 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>THUMBNAILS</span></div>
+      <div class="img-gallery" id="thumb-gallery">
+        <div id="thumb-placeholder" style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
+      </div>
+    </div>
+
+    <!-- 본문 이미지 갤러리 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>BODY IMAGES</span></div>
+      <div id="body-gallery">
+        <div id="body-placeholder" style="text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
+      </div>
+    </div>
+
+    <!-- OSMU -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>OSMU (숏폼/피드)</span></div>
+      <div id="osmu-placeholder" style="text-align:center;padding:12px;color:var(--text2);font-size:13px">원고가 생성되면 OSMU 팩이 표시됩니다</div>
+      <div id="osmu-content" style="display:none;flex-direction:column;gap:10px">
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--text0)">🎬 쇼츠/릴스 대본</span>
+            <button class="btn-sm" onclick="copyOSMU('youtube_shorts')" style="font-size:11px;padding:2px 6px">복사</button>
+          </div>
+          <textarea id="osmu-shorts" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+        </div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--text0)">📱 인스타 피드</span>
+            <button class="btn-sm" onclick="copyOSMU('instagram_feed')" style="font-size:11px;padding:2px 6px">복사</button>
+          </div>
+          <textarea id="osmu-insta" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 쇼핑 키워드 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>SHOPPING KW</span></div>
+      <div id="target-product-area"></div>
+      <div class="shop-kw-list" id="shop-kw-list"></div>
+    </div>
+
+    <!-- 스마트 이미지 대시보드 -->
+    <div id="img-dashboard-panel">
+      <div class="section-title" style="margin-bottom:8px">
+        <span><span class="dot"></span>IMAGE DASHBOARD</span>
+        <button class="btn-sm" onclick="loadImageDashboard()" style="font-size:11px;padding:2px 7px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn-sm btn-accent" onclick="openImageFolder()" style="flex:1;font-size:12px;padding:6px 0">📁 작업 폴더 열기</button>
+        <label class="btn-sm" style="flex:1;font-size:12px;padding:6px 0;text-align:center;cursor:pointer">
+          ＋ 사진 추가
+          <input type="file" id="img-upload-input" accept="image/*" multiple style="display:none" onchange="uploadImages(this.files)"/>
+        </label>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button class="img-filter-btn active" data-filter="all" onclick="filterDashboard('all',this)">전체</button>
+        <button class="img-filter-btn" data-filter="generated" onclick="filterDashboard('generated',this)">AI 생성</button>
+        <button class="img-filter-btn" data-filter="uploaded" onclick="filterDashboard('uploaded',this)">업로드</button>
+      </div>
+      <div id="upload-progress" style="display:none;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px" id="upload-progress-label">업로드 중...</div>
+        <div style="height:4px;background:var(--bg4);border-radius:2px">
+          <div id="upload-progress-bar" style="height:100%;background:var(--naver-green);border-radius:2px;width:0%;transition:width .3s"></div>
+        </div>
+      </div>
+      <div id="img-dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:360px;overflow-y:auto;padding-right:2px">
+        <div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text2);font-size:13px" id="dashboard-empty">이미지가 없습니다</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 이미지 복사 토스트 (전역 fixed) -->
+<div id="img-copy-toast" style="display:none;position:fixed;bottom:68px;left:50%;transform:translateX(-50%);
+  background:#03C75A;color:#fff;padding:10px 20px;border-radius:24px;
+  font-size:13px;font-weight:600;z-index:9999;white-space:nowrap;
+  box-shadow:0 4px 20px rgba(3,199,90,.4);pointer-events:none">
+  ✓ 이미지가 복사되었습니다. 네이버 에디터에 Ctrl+V 하세요!
+</div>
+
+<!-- ════════════════════════════════════════
+     MAIN APP — Bento Grid
 ════════════════════════════════════════ -->
 <div id="app">
 
   <!-- ── TOPBAR ── -->
   <div id="topbar">
-    <div class="logo">✦ HARU STUDIO <span>v1.0</span></div>
+    <div class="logo">✦ HARU STUDIO <span>v2.0</span></div>
     <div style="display:flex;align-items:center;gap:4px;margin-left:8px">
       <button id="btn-dark"  onclick="setTheme('dark')"  title="다크 모드"
-        style="width:28px;height:28px;border-radius:50%;border:2px solid transparent;
+        style="width:28px;height:28px;border-radius:50%;border:2px solid var(--naver-green);
                cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;
-               background:var(--naver-greenbg);color:var(--naver-green);border-color:var(--naver-green)">🌙</button>
+               background:var(--naver-greenbg);color:var(--naver-green);transition:all var(--transition)">🌙</button>
       <button id="btn-white" onclick="setTheme('white')" title="화이트 모드"
         style="width:28px;height:28px;border-radius:50%;border:2px solid transparent;
                cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;
-               background:var(--bg3);color:var(--text1)">☀</button>
+               background:var(--bg3);color:var(--text1);transition:all var(--transition)">☀</button>
       <button id="btn-warm"  onclick="setTheme('warm')"  title="웜 모드"
         style="width:28px;height:28px;border-radius:50%;border:2px solid transparent;
                cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;
-               background:var(--bg3);color:var(--text1)">🕯</button>
+               background:var(--bg3);color:var(--text1);transition:all var(--transition)">🕯</button>
     </div>
     <div id="harvest-bar">
       <div id="revenue-score-bar">
@@ -2496,17 +2434,18 @@ body {
       <button id="harvest-btn-title" class="harvest-btn" onclick="copyTitle()" disabled>제목 복사</button>
       <button id="harvest-btn-tags"  class="harvest-btn" onclick="copyTags()"  disabled>해시태그 복사</button>
       <button class="harvest-btn primary" onclick="openHarvestModal()">HTML 복사</button>
+      <button class="harvest-btn img-trigger" onclick="openDrawer('image-drawer')" title="이미지 패널 열기">🎨 이미지</button>
     </div>
   </div>
 
-  <!-- ── LEFT SIDEBAR ── -->
-  <div id="left">
+  <!-- ── LEFT SIDEBAR (bento-card) ── -->
+  <div id="left" class="bento-card">
 
     <!-- 1. Persona Card -->
     <div class="panel-section">
       <div class="section-title">
         <span><span class="dot"></span>PERSONA</span>
-        <span style="cursor:pointer;color:var(--text2);font-size:11px" onclick="openSlideover()">수정</span>
+        <span style="cursor:pointer;color:var(--text2);font-size:11px" onclick="openDrawer('persona-drawer')">수정</span>
       </div>
 
       <!-- 초기 설정 폼 (persona 없을 때) -->
@@ -2542,7 +2481,7 @@ body {
       </div>
 
       <!-- 저장 후 배지 -->
-      <div id="persona-badge" style="display:none" onclick="openSlideover()">
+      <div id="persona-badge" style="display:none" onclick="openDrawer('persona-drawer')">
         <div class="name" id="badge-name">—</div>
         <div class="meta" id="badge-meta">—</div>
       </div>
@@ -2626,8 +2565,8 @@ body {
     </div>
   </div>
 
-  <!-- ── CENTER EDITOR ── -->
-  <div id="center">
+  <!-- ── CENTER EDITOR (bento-card) ── -->
+  <div id="center" class="bento-card">
     <div id="editor-toolbar">
       <button class="tb-btn" onclick="editor.chain().focus().toggleBold().run()" title="굵게"><b>B</b></button>
       <button class="tb-btn" onclick="editor.chain().focus().toggleItalic().run()" title="기울기"><i>I</i></button>
@@ -2652,150 +2591,6 @@ body {
     </div>
   </div>
 
-  <!-- ── RIGHT PANEL ── -->
-  <div id="right">
-
-    <!-- Phase 3: AI 이미지 생성 트리거 -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>IMAGE ASSETS</span></div>
-      <button id="img-gen-trigger-btn" onclick="triggerImageGeneration()"
-        style="width:100%;background:var(--naver-green);border:none;color:#fff;font-weight:700;
-               font-size:14px;padding:11px 16px;border-radius:var(--radius);cursor:pointer;
-               display:flex;align-items:center;justify-content:center;gap:8px;
-               font-family:var(--font-mono);transition:all var(--transition);margin-bottom:6px"
-        disabled>
-        <span id="img-btn-icon">🎨</span>
-        <span id="img-btn-label">AI 이미지 생성</span>
-        <div id="img-btn-spinner" class="spinner" style="display:none;width:14px;height:14px;
-          border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;
-          animation:spin .7s linear infinite"></div>
-      </button>
-      <p id="img-gen-hint" style="font-size:12px;color:var(--text2);text-align:center;margin:0 0 6px">
-        원고 생성 후 활성화됩니다
-      </p>
-      <button id="img-retry-btn" onclick="triggerImageGeneration()" style="display:none;
-        width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--amber);
-        font-size:12px;padding:7px;border-radius:var(--radius);cursor:pointer;margin-bottom:6px">
-        ↻ 이미지 다시 생성
-      </button>
-      <div class="field-label" style="margin-top:4px">추가 프롬프트 (선택)</div>
-      <div class="img-prompt-row">
-        <input id="img-prompt-input" class="field-input" placeholder="이미지 설명 입력..." style="font-size:13px;padding:7px 9px"/>
-      </div>
-    </div>
-
-    <!-- 썸네일 갤러리 -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>THUMBNAILS</span></div>
-      <div class="img-gallery" id="thumb-gallery">
-        <div id="thumb-placeholder" style="grid-column:1/-1;text-align:center;padding:16px;
-          color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
-      </div>
-    </div>
-
-    <!-- 본문 이미지 갤러리 -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>BODY IMAGES</span></div>
-      <div id="body-gallery" style="padding:0 10px 10px">
-        <div id="body-placeholder" style="text-align:center;padding:16px;
-          color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
-      </div>
-    </div>
-
-    <!-- 원소스 멀티유즈 (OSMU) -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>OSMU (숏폼/피드)</span></div>
-      <div style="padding:0 10px 10px">
-        <div id="osmu-placeholder" style="text-align:center;padding:16px;color:var(--text2);font-size:13px">원고가 생성되면 OSMU 팩이 표시됩니다</div>
-        <div id="osmu-content" style="display:none;flex-direction:column;gap:10px">
-          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-              <span style="font-size:12px;font-weight:600;color:var(--text0)">🎬 쇼츠/릴스 대본</span>
-              <button class="btn-sm" onclick="copyOSMU('youtube_shorts')" style="font-size:11px;padding:2px 6px">복사</button>
-            </div>
-            <textarea id="osmu-shorts" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
-          </div>
-          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-              <span style="font-size:12px;font-weight:600;color:var(--text0)">📱 인스타 피드</span>
-              <button class="btn-sm" onclick="copyOSMU('instagram_feed')" style="font-size:11px;padding:2px 6px">복사</button>
-            </div>
-            <textarea id="osmu-insta" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 쇼핑 키워드 -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>SHOPPING KW</span></div>
-      <div id="target-product-area"></div>
-      <div class="shop-kw-list" id="shop-kw-list"></div>
-    </div>
-
-    <!-- ── 스마트 이미지 대시보드 ── -->
-    <div class="panel-section" id="img-dashboard-panel">
-      <div class="section-title">
-        <span><span class="dot"></span>IMAGE DASHBOARD</span>
-        <button class="btn-sm" onclick="loadImageDashboard()" title="새로고침"
-          style="font-size:11px;padding:2px 7px">↻</button>
-      </div>
-
-      <!-- 상단 액션 버튼 -->
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button class="btn-sm btn-accent" onclick="openImageFolder()"
-          style="flex:1;font-size:12px;padding:6px 0">
-          📁 작업 폴더 열기
-        </button>
-        <label class="btn-sm" style="flex:1;font-size:12px;padding:6px 0;
-          text-align:center;cursor:pointer;
-          background:var(--bg3);border:1px solid var(--border2);
-          border-radius:var(--radius);color:var(--text1)">
-          ＋ 사진 추가
-          <input type="file" id="img-upload-input" accept="image/*" multiple
-            style="display:none" onchange="uploadImages(this.files)"/>
-        </label>
-      </div>
-
-      <!-- 필터 탭 -->
-      <div style="display:flex;gap:4px;margin-bottom:8px">
-        <button class="img-filter-btn active" data-filter="all"
-          onclick="filterDashboard('all',this)">전체</button>
-        <button class="img-filter-btn" data-filter="generated"
-          onclick="filterDashboard('generated',this)">AI 생성</button>
-        <button class="img-filter-btn" data-filter="uploaded"
-          onclick="filterDashboard('uploaded',this)">업로드</button>
-      </div>
-
-      <!-- 업로드 진행 표시 -->
-      <div id="upload-progress" style="display:none;margin-bottom:8px">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:4px" id="upload-progress-label">업로드 중...</div>
-        <div style="height:4px;background:var(--bg4);border-radius:2px">
-          <div id="upload-progress-bar" style="height:100%;background:var(--naver-green);border-radius:2px;width:0%;transition:width .3s"></div>
-        </div>
-      </div>
-
-      <!-- 이미지 그리드 -->
-      <div id="img-dashboard-grid" style="
-        display:grid;grid-template-columns:1fr 1fr;gap:8px;
-        max-height:420px;overflow-y:auto;padding-right:2px">
-        <div style="grid-column:1/-1;text-align:center;padding:20px;
-          color:var(--text2);font-size:13px" id="dashboard-empty">
-          이미지가 없습니다
-        </div>
-      </div>
-
-      <!-- 토스트 메시지 -->
-      <div id="img-copy-toast" style="
-        display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
-        background:#03C75A;color:#fff;padding:10px 20px;border-radius:24px;
-        font-size:13px;font-weight:600;z-index:9999;white-space:nowrap;
-        box-shadow:0 4px 20px rgba(3,199,90,.4);pointer-events:none">
-        ✓ 이미지가 복사되었습니다. 네이버 에디터에 Ctrl+V 하세요!
-      </div>
-    </div>
-  </div>
-
   <!-- ── TERMINAL ── -->
   <div id="terminal">
     <div id="term-header">
@@ -2813,9 +2608,15 @@ body {
 
 <!-- Mobile Tab Bar -->
 <div class="mobile-tabs" id="mobile-tabs">
-  <div class="mobile-tab active" onclick="showMobileTab('left')">전략</div>
-  <div class="mobile-tab" onclick="showMobileTab('center')">편집</div>
-  <div class="mobile-tab" onclick="showMobileTab('right')">도구</div>
+  <div class="mobile-tab" data-panel="left" onclick="showMobileTab('left')">
+    <span class="tab-icon">⚙</span><span class="tab-label">전략</span>
+  </div>
+  <div class="mobile-tab active" data-panel="center" onclick="showMobileTab('center')">
+    <span class="tab-icon">✍</span><span class="tab-label">편집</span>
+  </div>
+  <div class="mobile-tab" data-panel="images" onclick="showMobileTab('images')">
+    <span class="tab-icon">🖼</span><span class="tab-label">이미지</span>
+  </div>
 </div>
 
 <!-- ════════════════════════════════════════
@@ -2925,7 +2726,7 @@ function savePersonaFromSlideover() {
   };
   saveState();
   renderPersonaBadge();
-  closeSlideover();
+  closeDrawer();
   logTerm('PERSONA', `페르소나 업데이트: ${S.persona.job}`, 'done');
 }
 
@@ -3124,7 +2925,7 @@ async function uploadImages(files) {
   await loadImageDashboard();
 }
 
-/* ─── 테마 스위처 ─── */
+/* ─── 테마 스위처 (Lume) ─── */
 function setTheme(mode, save = true) {
   document.documentElement.setAttribute('data-theme', mode);
   if (save) localStorage.setItem('haru_theme', mode);
@@ -3132,20 +2933,29 @@ function setTheme(mode, save = true) {
     const btn = document.getElementById('btn-' + m);
     if (!btn) return;
     if (m === mode) {
-      btn.style.background    = 'var(--naver-greenbg)';
-      btn.style.color         = 'var(--naver-green)';
-      btn.style.borderColor   = 'var(--naver-green)';
+      btn.style.background  = 'var(--naver-greenbg)';
+      btn.style.color       = 'var(--naver-green)';
+      btn.style.borderColor = 'var(--naver-green)';
     } else {
-      btn.style.background    = 'var(--bg3)';
-      btn.style.color         = 'var(--text1)';
-      btn.style.borderColor   = 'transparent';
+      btn.style.background  = 'var(--bg3)';
+      btn.style.color       = 'var(--text1)';
+      btn.style.borderColor = 'transparent';
     }
   });
   document.documentElement.style.setProperty('--persona-accent', '#03C75A');
 }
 
-function openSlideover() {
-  if (S.persona) {
+/* ─── Drawer / Adaptive Sheet 시스템 ─── */
+function openDrawer(id) {
+  const drawer   = document.getElementById(id);
+  const backdrop = document.getElementById('drawer-backdrop');
+  if (!drawer) return;
+  // 다른 드로어 닫기
+  document.querySelectorAll('.side-drawer.open').forEach(d => { if (d.id !== id) d.classList.remove('open'); });
+  // 모바일 전략 패널 닫기
+  document.getElementById('left')?.classList.remove('mobile-open');
+
+  if (id === 'persona-drawer' && S.persona) {
     document.getElementById('so-job').value    = S.persona.job    || '';
     document.getElementById('so-age').value    = S.persona.age    || '';
     document.getElementById('so-career').value = S.persona.career || '';
@@ -3154,12 +2964,22 @@ function openSlideover() {
       c.classList.toggle('active', c.dataset.color === S.personaColor);
     });
   }
-  document.getElementById('persona-slideover').classList.add('open');
+
+  drawer.classList.add('open');
+  backdrop.classList.add('show');
+  document.body.style.overflow = 'hidden';
 }
 
-function closeSlideover() {
-  document.getElementById('persona-slideover').classList.remove('open');
+function closeDrawer() {
+  document.querySelectorAll('.side-drawer').forEach(d => d.classList.remove('open'));
+  document.getElementById('left')?.classList.remove('mobile-open');
+  document.getElementById('drawer-backdrop')?.classList.remove('show');
+  document.body.style.overflow = '';
 }
+
+/* 기존 코드 호환 */
+function openSlideover()  { openDrawer('persona-drawer'); }
+function closeSlideover() { closeDrawer(); }
 
 /* ─── Keyword 탭 ─── */
 function setKwTab(tab) {
@@ -3852,17 +3672,35 @@ async function apiFetch(url, method = 'GET', body = null, timeout = 30000) {
   }
 }
 
-/* ─── Mobile 탭 ─── */
+/* ─── Mobile 탭 (Bottom Sheet) ─── */
 function showMobileTab(panel) {
-  ['left','center','right'].forEach(p => {
-    const el = document.getElementById(p);
-    el.style.display = (p === panel) ? 'flex' : 'none';
-    el.style.gridArea = 'mobile-content';
+  // 탭 active 표시 업데이트
+  document.querySelectorAll('.mobile-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.panel === panel);
   });
-  document.querySelectorAll('.mobile-tab').forEach((t, i) => {
-    t.classList.toggle('active', ['left','center','right'][i] === panel);
-  });
+
+  if (panel === 'left') {
+    // 이미지 드로어 닫고 전략 패널 토글
+    document.querySelectorAll('.side-drawer').forEach(d => d.classList.remove('open'));
+    const left = document.getElementById('left');
+    const isOpen = !left.classList.contains('mobile-open');
+    left.classList.toggle('mobile-open', isOpen);
+    document.getElementById('drawer-backdrop').classList.toggle('show', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+  } else if (panel === 'center') {
+    // 모든 오버레이 닫기, 에디터 포커스
+    closeDrawer();
+    if (editor) setTimeout(() => editor.commands.focus(), 100);
+  } else if (panel === 'images') {
+    document.getElementById('left')?.classList.remove('mobile-open');
+    openDrawer('image-drawer');
+  }
 }
+
+/* ─── ESC 키로 드로어/패널 닫기 ─── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDrawer();
+});
 
 /* ─── 전역 에러 캐치 (디버깅용) ─── */
 window.addEventListener('error', (e) => {

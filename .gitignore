@@ -1,11 +1,25 @@
+# Python
 __pycache__/
 *.pyc
-.env
-logs/
-outputs/
-backups/
+*.pyo
 .venv/
 venv/
 env/
+
+# 환경변수 (절대 커밋 금지!)
+.env
+
+# Vercel 로컬 빌드
+.vercel/
+
+# 런타임 생성 파일
+logs/
+outputs/
+backups/
+static/generated/
+
+# macOS
 .DS_Store
+
+# 압축 파일
 files.zip
