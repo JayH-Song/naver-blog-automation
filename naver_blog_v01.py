@@ -60,11 +60,16 @@ load_dotenv()
 # 경로 설정 (로깅보다 반드시 먼저 실행)
 # ────────────────────────────────────────────
 BASE_DIR     = Path(__file__).parent
-BACKUP_DIR   = BASE_DIR / "backups"
-OUTPUT_DIR   = BASE_DIR / "outputs"
-STATIC_DIR   = BASE_DIR / "static" / "generated"
-IMAGE_DIR    = BASE_DIR / "outputs" / "images"
-LOG_DIR      = BASE_DIR / "logs"
+
+import os
+IS_VERCEL = os.environ.get("VERCEL") == "1"
+WRITABLE_DIR = Path("/tmp") if IS_VERCEL else BASE_DIR
+
+BACKUP_DIR   = WRITABLE_DIR / "backups"
+OUTPUT_DIR   = WRITABLE_DIR / "outputs"
+STATIC_DIR   = WRITABLE_DIR / "static" / "generated"
+IMAGE_DIR    = WRITABLE_DIR / "outputs" / "images"
+LOG_DIR      = WRITABLE_DIR / "logs"
 
 for d in [BACKUP_DIR, OUTPUT_DIR, STATIC_DIR, IMAGE_DIR, LOG_DIR]:
     d.mkdir(parents=True, exist_ok=True)
@@ -3863,7 +3868,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Haru Studio API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/static", StaticFiles(directory=str(WRITABLE_DIR / "static")), name="static")
 
 @app.get("/")
 async def root():
@@ -4175,7 +4180,7 @@ async def api_list_images():
             return
         for fp in sorted(folder.rglob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
             if fp.suffix.lower() in exts:
-                rel = fp.relative_to(BASE_DIR)
+                rel = fp.relative_to(WRITABLE_DIR)
                 images.append({
                     "url":      f"/static-file/{rel.as_posix()}",
                     "filename": fp.name,
@@ -4205,7 +4210,7 @@ async def api_upload_image(file: "UploadFile"):
     if len(content) > 20 * 1024 * 1024:   # 20 MB 제한
         raise HTTPException(413, "파일이 너무 큽니다 (최대 20MB)")
     fpath.write_bytes(content)
-    rel = fpath.relative_to(BASE_DIR)
+    rel = fpath.relative_to(WRITABLE_DIR)
     return {"url": f"/static-file/{rel.as_posix()}", "filename": fname}
 
 
@@ -4226,15 +4231,15 @@ async def api_open_folder():
         raise HTTPException(500, str(e))
 
 
-# 업로드 이미지 정적 서빙 (BASE_DIR 기준 상대 경로)
+# 업로드 이미지 정적 서빙 (WRITABLE_DIR 기준 상대 경로)
 from fastapi.responses import FileResponse as _FileResponse
 @app.get("/static-file/{path:path}")
 async def serve_static_file(path: str):
     """outputs/images + static/generated 파일 서빙 (CORS 없는 동일 origin)"""
-    fpath = BASE_DIR / path
+    fpath = WRITABLE_DIR / path
     # 경로 탈출 방지
     try:
-        fpath.resolve().relative_to(BASE_DIR.resolve())
+        fpath.resolve().relative_to(WRITABLE_DIR.resolve())
     except ValueError:
         raise HTTPException(403, "접근 불가")
     if not fpath.exists() or not fpath.is_file():
