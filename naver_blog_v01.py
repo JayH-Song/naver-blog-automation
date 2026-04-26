@@ -1666,7 +1666,7 @@ body {
     "topbar topbar topbar"
     "left   center right"
     "term   term   term";
-  height: 100vh;
+  height: 100dvh;
 }
 
 /* ── Topbar ── */
@@ -2179,7 +2179,8 @@ body {
   border: 1px solid var(--border2);
   border-radius: var(--radius-lg);
   padding: 28px;
-  width: 380px;
+  width: 90%;
+  max-width: 380px;
   box-shadow: 0 24px 60px rgba(0,0,0,.5);
 }
 .modal-box h3 { font-size: 15px; margin-bottom: 16px; font-weight: 600; }
@@ -2292,6 +2293,7 @@ body {
       "term";
     grid-template-columns: 1fr;
     grid-template-rows: 48px 1fr 120px;
+    padding-bottom: 50px; /* 탭 바 공간 확보 */
   }
   #left, #center, #right { display: none; }
   #center { grid-area: mobile-content; }
@@ -2300,22 +2302,33 @@ body {
     display: flex !important;
   }
   .logo span { display: none; }
-  #harvest-bar .harvest-btn { font-size: 12px; padding: 4px 8px; }
+  #harvest-bar .harvest-btn { font-size: 11px; padding: 4px 6px; }
+  .panel-section { padding: 16px; }
 }
 .mobile-tabs {
   display: none;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
+  background: rgba(34,34,36, 0.9);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
   position: fixed;
   bottom: 0; left: 0; right: 0;
   z-index: 200;
+  height: 50px;
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
 }
 .mobile-tab {
-  flex: 1; padding: 10px; text-align: center;
-  font-size: 11px; color: var(--text2); cursor: pointer;
-  border-top: 1px solid var(--border);
+  flex: 1; padding: 12px 10px; text-align: center;
+  font-size: 13px; color: var(--text2); cursor: pointer;
+  border-top: 2px solid transparent;
+  transition: all 0.2s;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 500;
 }
-.mobile-tab.active { color: var(--persona-accent); }
+.mobile-tab.active { 
+  color: var(--persona-accent); 
+  border-top: 2px solid var(--persona-accent);
+  background: linear-gradient(to bottom, rgba(255,255,255,0.05), transparent);
+}
 
 /* 스크롤바 */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -2329,8 +2342,8 @@ body {
 <!-- ════════════════════════════════════════
      LOGIN OVERLAY
 ════════════════════════════════════════ -->
-<div id="login-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg1);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.3s;">
-  <div style="background:var(--card);padding:40px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);text-align:center;width:320px;border:1px solid var(--border);">
+<div id="login-overlay" style="position:fixed;top:0;left:0;width:100%;height:100dvh;background:var(--bg1);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.3s;padding:20px;box-sizing:border-box;">
+  <div style="background:var(--card);padding:40px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);text-align:center;width:100%;max-width:320px;border:1px solid var(--border);box-sizing:border-box;">
     <h1 style="font-size:24px;margin-bottom:8px;font-weight:700;color:var(--text);letter-spacing:-0.5px;">Haru Studio</h1>
     <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">승인된 사용자만 접근할 수 있습니다.</p>
     <input type="password" id="login-pwd" placeholder="비밀번호" onkeydown="if(event.key==='Enter') doLogin()" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg0);color:var(--text);margin-bottom:16px;box-sizing:border-box;outline:none;">
