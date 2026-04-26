@@ -2327,6 +2327,45 @@ body {
 <body>
 
 <!-- ════════════════════════════════════════
+     LOGIN OVERLAY
+════════════════════════════════════════ -->
+<div id="login-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg1);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.3s;">
+  <div style="background:var(--card);padding:40px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);text-align:center;width:320px;border:1px solid var(--border);">
+    <h1 style="font-size:24px;margin-bottom:8px;font-weight:700;color:var(--text);letter-spacing:-0.5px;">Haru Studio</h1>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">승인된 사용자만 접근할 수 있습니다.</p>
+    <input type="password" id="login-pwd" placeholder="비밀번호" onkeydown="if(event.key==='Enter') doLogin()" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg0);color:var(--text);margin-bottom:16px;box-sizing:border-box;outline:none;">
+    <button onclick="doLogin()" style="width:100%;padding:12px;border-radius:8px;background:var(--naver-green);color:#fff;border:none;cursor:pointer;font-weight:600;">입장하기</button>
+    <p id="login-err" style="color:var(--red);font-size:12px;margin-top:12px;display:none;">비밀번호가 일치하지 않습니다.</p>
+  </div>
+</div>
+<script>
+  function doLogin() {
+    const pwd = document.getElementById('login-pwd').value;
+    if (!pwd) return;
+    localStorage.setItem('haru_token', pwd);
+    apiFetch('/api/verify').then(() => {
+      document.getElementById('login-overlay').style.opacity = '0';
+      setTimeout(() => document.getElementById('login-overlay').style.display = 'none', 300);
+      connectWS(); // 웹소켓 토큰 갱신
+    }).catch(() => {
+      document.getElementById('login-err').style.display = 'block';
+      localStorage.removeItem('haru_token');
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('haru_token');
+    if (token) {
+      apiFetch('/api/verify').then(() => {
+        document.getElementById('login-overlay').style.display = 'none';
+      }).catch(() => {
+        document.getElementById('login-overlay').style.display = 'flex';
+      });
+    }
+  });
+</script>
+
+<!-- ════════════════════════════════════════
      HARVEST GUARD MODAL
 ════════════════════════════════════════ -->
 <div id="harvest-modal">
@@ -3692,8 +3731,10 @@ function setProgress(pct) {
 /* ─── WebSocket 연결 ─── */
 let ws;
 function connectWS() {
+  if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+  const token = localStorage.getItem('haru_token') || '';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/pipeline`);
+  ws = new WebSocket(`${proto}://${location.host}/ws/pipeline?token=${token}`);
   ws.onmessage = (evt) => {
     try {
       const data = JSON.parse(evt.data);
@@ -3707,10 +3748,13 @@ function connectWS() {
 async function apiFetch(url, method = 'GET', body = null, timeout = 30000) {
   const ctrl = new AbortController();
   const tid  = setTimeout(() => ctrl.abort(), timeout);
+  const token = localStorage.getItem('haru_token') || '';
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
     const res = await fetch(url, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers,
       body:    body ? JSON.stringify(body) : undefined,
       signal:  ctrl.signal,
     });
@@ -3870,6 +3914,28 @@ app = FastAPI(title="Haru Studio API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(WRITABLE_DIR / "static")), name="static")
 
+from fastapi import Request
+from starlette.responses import JSONResponse
+
+HARU_PASSWORD = os.environ.get("HARU_PASSWORD", "cozy1234")
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        token = auth_header.split(" ")[1]
+        if token != HARU_PASSWORD:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    response = await call_next(request)
+    return response
+
+@app.get("/api/verify")
+async def api_verify():
+    # Middleware already checked the token
+    return {"ok": True}
+
 @app.get("/")
 async def root():
     return HTMLResponse(content=_INDEX_HTML, status_code=200)
@@ -3879,6 +3945,10 @@ async def root():
 # ────────────────────────────────────────────
 @app.websocket("/ws/pipeline")
 async def ws_pipeline(ws: WebSocket):
+    token = ws.query_params.get("token")
+    if token != HARU_PASSWORD:
+        await ws.close(code=1008)
+        return
     await ws_manager.connect(ws)
     try:
         while True:
