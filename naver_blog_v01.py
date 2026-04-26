@@ -768,13 +768,22 @@ def build_system_prompt(
 ## 법적 준수사항
 의료법·건강기능식품법 — 단정적 효능 표현 절대 금지
 
+## OSMU (원소스 멀티유즈) 콘텐츠 추가
+- 블로그 원본 외에 숏폼 대본과 인스타그램 피드 텍스트를 함께 제공하세요.
+- instagram_feed: 인스타 감성의 가독성 높은 피드 요약글 (해시태그 포함)
+- youtube_shorts: 1분 이내 분량의 시선을 끄는 쇼츠/릴스/틱톡 세로형 숏폼 대본 (행동, 자막 등 포함)
+
 ## 출력 형식 (JSON 필수, 코드블록 없이)
 - content 값 내부의 줄바꿈은 반드시 \\n 으로 이스케이프하라 (JSON 파싱 오류 방지)
 - 큰따옴표(") 는 반드시 \\" 로 이스케이프하라
 {{
   "title": "SEO 최적화된 제목",
   "content": "<p>HTML 본문 — 줄바꿈은 \\n, 따옴표는 \\"로 이스케이프</p>",
-  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
+  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
+  "osmu": {{
+    "instagram_feed": "인스타그램 피드 텍스트...",
+    "youtube_shorts": "쇼츠 대본 내용..."
+  }}
 }}"""
 
 def _sanitize_content(content: str) -> str:
@@ -844,15 +853,22 @@ def _robust_parse_article(raw: str) -> dict:
     title   = title_m.group(1) if title_m else ""
     content = content_m.group(1).replace('\\n', '\n') if content_m else ""
     tags    = re.findall(r'"([^"]+)"', tags_m.group(1)) if tags_m else []
+    
+    osmu = {}
+    osmu_m = re.search(r'"osmu"\s*:\s*(\{.*?\})', text, re.DOTALL)
+    if osmu_m:
+        try: osmu = json.loads(osmu_m.group(1).replace('\n', '\\n'))
+        except: pass
 
     if content:
-        return {"title": title, "content": _sanitize_content(content), "tags": tags}
+        return {"title": title, "content": _sanitize_content(content), "tags": tags, "osmu": osmu}
 
     # 4단계: 완전 폴백
     return {
         "title":   title or "",
         "content": _sanitize_content(f"<div>{text}</div>"),
         "tags":    tags,
+        "osmu":    osmu,
     }
 
 
@@ -2686,6 +2702,30 @@ body {
       </div>
     </div>
 
+    <!-- 원소스 멀티유즈 (OSMU) -->
+    <div class="panel-section">
+      <div class="section-title"><span><span class="dot"></span>OSMU (숏폼/피드)</span></div>
+      <div style="padding:0 10px 10px">
+        <div id="osmu-placeholder" style="text-align:center;padding:16px;color:var(--text2);font-size:13px">원고가 생성되면 OSMU 팩이 표시됩니다</div>
+        <div id="osmu-content" style="display:none;flex-direction:column;gap:10px">
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:12px;font-weight:600;color:var(--text0)">🎬 쇼츠/릴스 대본</span>
+              <button class="btn-sm" onclick="copyOSMU('youtube_shorts')" style="font-size:11px;padding:2px 6px">복사</button>
+            </div>
+            <textarea id="osmu-shorts" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+          </div>
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:12px;font-weight:600;color:var(--text0)">📱 인스타 피드</span>
+              <button class="btn-sm" onclick="copyOSMU('instagram_feed')" style="font-size:11px;padding:2px 6px">복사</button>
+            </div>
+            <textarea id="osmu-insta" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 쇼핑 키워드 -->
     <div class="panel-section">
       <div class="section-title"><span><span class="dot"></span>SHOPPING KW</span></div>
@@ -3312,6 +3352,7 @@ async function generate() {
     checkForbiddenWords();
     updateRevenueScore(result.revenue_score || 0, result.revenue_match || 'none');
     renderShoppingKw(result.shopping || {});
+    renderOSMU(result.osmu || {});
 
     // run_id 저장 (Phase 3 이미지 생성에 사용)
     S.lastResult  = result;
@@ -3484,6 +3525,32 @@ function insertImage(url, alt) {
   if (!url) return;
   editor.chain().focus().setImage({ src: url, alt }).run();
   logTerm('IMG', `이미지 삽입: ${url.split('/').pop()}`, 'done');
+}
+
+/* ─── OSMU 렌더링 ─── */
+function renderOSMU(osmu) {
+  const container = document.getElementById('osmu-content');
+  const placeholder = document.getElementById('osmu-placeholder');
+  if (!container || !placeholder) return;
+  
+  if (!osmu || (!osmu.youtube_shorts && !osmu.instagram_feed)) {
+    container.style.display = 'none';
+    placeholder.style.display = 'block';
+    return;
+  }
+  placeholder.style.display = 'none';
+  container.style.display = 'flex';
+  document.getElementById('osmu-shorts').value = osmu.youtube_shorts || '생성된 대본이 없습니다.';
+  document.getElementById('osmu-insta').value = osmu.instagram_feed || '생성된 피드 텍스트가 없습니다.';
+}
+
+window.copyOSMU = function(type) {
+  const text = type === 'youtube_shorts' ? document.getElementById('osmu-shorts').value : document.getElementById('osmu-insta').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    alert('복사되었습니다.');
+    logTerm('OSMU', type === 'youtube_shorts' ? '쇼츠 대본 복사' : '인스타 피드 복사', 'done');
+  });
 }
 
 /* ─── 인라인 이미지 생성 ─── */
@@ -3862,6 +3929,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (S.lastResult?.content) {
       editor.commands.setContent(S.lastResult.content);
       renderShoppingKw(S.lastResult.shopping || {});
+      renderOSMU(S.lastResult.osmu || {});
       updateRevenueScore(S.lastResult.revenue_score || 0, S.lastResult.revenue_match || 'none');
       // harvest 버튼 활성화
       ['harvest-btn-title', 'harvest-btn-tags'].forEach(id => {
