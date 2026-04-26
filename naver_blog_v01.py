@@ -2406,7 +2406,7 @@ body {
   <div style="display:flex;flex-direction:column;gap:12px;">
     <div>
       <div class="field-label">직업</div>
-      <input class="field-input" id="so-job" placeholder="예: 병원 재활 간호사"/>
+      <input class="field-input" id="so-job" placeholder="페르소나에 사용할 직업을 입력하세요"/>
     </div>
     <div>
       <div class="field-label">연령</div>
@@ -2414,10 +2414,10 @@ body {
     </div>
     <div>
       <div class="field-label">경력 배경</div>
-      <textarea class="field-input" id="so-career" rows="3" placeholder="예: 대학병원 내과 8년, 현재 재활의학과 전담"></textarea>
+      <textarea class="field-input" id="so-career" rows="3" placeholder="페르소나에 사용할 경력을 입력하세요"></textarea>
     </div>
     <div>
-      <div class="field-label">가족 서사</div>
+      <div class="field-label">가족/그 외 페르소나 정보</div>
       <textarea class="field-input" id="so-family" rows="3" placeholder="예: 4살 딸 육아 중, 남편은 IT 종사자"></textarea>
     </div>
     <div>
@@ -2484,7 +2484,7 @@ body {
       <div id="persona-setup" style="display:flex">
         <div>
           <div class="field-label">직업</div>
-          <input class="field-input" id="p-job" placeholder="예: 병원 재활 간호사"/>
+          <input class="field-input" id="p-job" placeholder="페르소나에 사용할 직업을 입력하세요"/>
         </div>
         <div>
           <div class="field-label">연령</div>
@@ -2492,10 +2492,10 @@ body {
         </div>
         <div>
           <div class="field-label">경력 배경</div>
-          <textarea class="field-input" id="p-career" rows="2" placeholder="예: 대학병원 내과 8년"></textarea>
+          <textarea class="field-input" id="p-career" rows="2" placeholder="페르소나에 사용할 경력을 입력하세요"></textarea>
         </div>
         <div>
-          <div class="field-label">가족 서사</div>
+          <div class="field-label">가족/그 외 페르소나 정보</div>
           <textarea class="field-input" id="p-family" rows="2" placeholder="예: 4살 딸 육아 중"></textarea>
         </div>
         <div>
