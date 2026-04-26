@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+logs/
+outputs/
+backups/
+.venv/
+venv/
+env/
+.DS_Store
+files.zip

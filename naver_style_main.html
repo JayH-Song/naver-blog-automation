@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Haru Studio ✦ 블로그 워크스테이션</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+/* ── 테마 변수 ── */
+:root {
+  --naver-green: #03C75A;
+  --naver-green2: #02a44c;
+  --radius: 12px;
+  --transition: 0.22s cubic-bezier(.4,0,.2,1);
+  --font: 'Pretendard', 'Apple SD Gothic Neo', sans-serif;
+  --font-size-base: 17px;
+  --shadow: 0 2px 16px rgba(0,0,0,.10);
+}
+
+[data-theme="dark"] {
+  --bg: #1A1A1B;
+  --bg2: #222224;
+  --bg3: #2a2a2d;
+  --bg4: #333337;
+  --border: #333337;
+  --border2: #44444a;
+  --text0: #e8e8ea;
+  --text1: #a0a0a8;
+  --text2: #606068;
+  --card-bg: #222224;
+  --topbar-bg: #18181a;
+  --badge-bg: rgba(3,199,90,.15);
+}
+
+[data-theme="white"] {
+  --bg: #f2f4f6;
+  --bg2: #ffffff;
+  --bg3: #f7f8fa;
+  --bg4: #eceef0;
+  --border: #e0e2e6;
+  --border2: #c8cdd4;
+  --text0: #1a1a1b;
+  --text1: #4a4a52;
+  --text2: #909098;
+  --card-bg: #ffffff;
+  --topbar-bg: #ffffff;
+  --badge-bg: rgba(3,199,90,.10);
+}
+
+[data-theme="warm"] {
+  --bg: #FDF5E6;
+  --bg2: #faf0dc;
+  --bg3: #f5ead0;
+  --bg4: #ede0c0;
+  --border: #e8d8b0;
+  --border2: #d8c498;
+  --text0: #3b2a14;
+  --text1: #6b4c28;
+  --text2: #a08050;
+  --card-bg: #faf0dc;
+  --topbar-bg: #f7ead4;
+  --badge-bg: rgba(3,199,90,.12);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  font-size: var(--font-size-base);
+  background: var(--bg);
+  color: var(--text0);
+  line-height: 1.65;
+  transition: background var(--transition), color var(--transition);
+  min-height: 100vh;
+}
+
+/* ── 탑바 ── */
+#topbar {
+  position: sticky; top: 0; z-index: 200;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 24px; height: 56px; gap: 16px;
+  transition: background var(--transition), border-color var(--transition);
+  backdrop-filter: blur(8px);
+}
+
+.logo {
+  font-size: 18px; font-weight: 700;
+  color: var(--naver-green); letter-spacing: -.02em;
+  display: flex; align-items: center; gap: 6px;
+}
+.logo-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--naver-green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100%{box-shadow:0 0 0 0 rgba(3,199,90,.4)}
+  50%{box-shadow:0 0 0 6px rgba(3,199,90,0)}
+}
+
+.topbar-spacer { flex: 1; }
+
+/* ── 테마 스위처 ── */
+#theme-switcher {
+  display: flex; align-items: center;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 40px;
+  padding: 4px;
+  gap: 2px;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.theme-btn {
+  border: none; cursor: pointer;
+  border-radius: 32px;
+  padding: 6px 14px;
+  font-size: 13px; font-weight: 500;
+  font-family: var(--font);
+  color: var(--text1);
+  background: transparent;
+  transition: all .2s;
+  display: flex; align-items: center; gap: 5px;
+  white-space: nowrap;
+}
+.theme-btn:hover { color: var(--text0); background: var(--bg4); }
+.theme-btn.active {
+  background: var(--naver-green);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ── 메인 컨테이너 ── */
+#main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+}
+
+/* ── 히어로 배너 ── */
+#hero {
+  background: linear-gradient(135deg, var(--naver-green) 0%, #02a44c 50%, #017a38 100%);
+  border-radius: var(--radius);
+  padding: 44px 40px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+}
+#hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='20'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  pointer-events: none;
+}
+.hero-eyebrow {
+  font-size: 13px; font-weight: 500;
+  opacity: .85; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.hero-eyebrow::before {
+  content: ''; width: 20px; height: 2px; background: rgba(255,255,255,.6);
+}
+.hero-title {
+  font-size: 30px; font-weight: 700;
+  line-height: 1.35; margin-bottom: 14px;
+  letter-spacing: -.03em;
+}
+.hero-sub {
+  font-size: 16px; opacity: .88; margin-bottom: 24px;
+  max-width: 500px; line-height: 1.6;
+}
+.hero-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn-primary {
+  background: #fff; color: var(--naver-green);
+  border: none; border-radius: 8px;
+  padding: 11px 22px; font-size: 15px; font-weight: 700;
+  cursor: pointer; font-family: var(--font);
+  transition: all .2s;
+  display: flex; align-items: center; gap: 6px;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.btn-ghost {
+  background: rgba(255,255,255,.15);
+  color: #fff; border: 1px solid rgba(255,255,255,.3);
+  border-radius: 8px; padding: 11px 22px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  font-family: var(--font); transition: all .2s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,.25); }
+
+/* ── 섹션 타이틀 ── */
+.section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.section-title {
+  font-size: 18px; font-weight: 700;
+  color: var(--text0);
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title::before {
+  content: '';
+  width: 4px; height: 18px;
+  background: var(--naver-green);
+  border-radius: 2px;
+}
+.section-more {
+  font-size: 13px; color: var(--text2);
+  text-decoration: none; cursor: pointer;
+  display: flex; align-items: center; gap: 3px;
+  transition: color .2s;
+}
+.section-more:hover { color: var(--naver-green); }
+
+/* ── 카드 그리드 ── */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 32px;
+}
+@media (max-width: 720px) { .card-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .card-grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+.card::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: var(--radius);
+  border: 2px solid var(--naver-green);
+  opacity: 0; transition: opacity .2s;
+}
+.card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.card:hover::after { opacity: 1; }
+
+.card-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: var(--badge-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; margin-bottom: 14px;
+}
+.card-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.card-desc { font-size: 14px; color: var(--text1); line-height: 1.5; }
+.card-badge {
+  position: absolute; top: 16px; right: 16px;
+  background: var(--naver-green); color: #fff;
+  font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 20px;
+}
+
+/* ── 키워드 섹션 ── */
+.keyword-row {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 32px;
+}
+.keyword-chip {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 7px 16px;
+  font-size: 14px; font-weight: 500;
+  color: var(--text1); cursor: pointer;
+  transition: all .18s;
+  display: flex; align-items: center; gap: 6px;
+}
+.keyword-chip:hover,
+.keyword-chip.active {
+  background: var(--badge-bg);
+  border-color: var(--naver-green);
+  color: var(--naver-green); font-weight: 600;
+}
+.keyword-chip .rank {
+  font-size: 11px; font-weight: 700;
+  color: var(--naver-green);
+  min-width: 16px; text-align: center;
+}
+
+/* ── 리스트 카드 ── */
+.list-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 32px;
+  transition: background var(--transition), border-color var(--transition);
+}
+.list-item {
+  display: flex; align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; gap: 14px;
+  transition: background .15s;
+}
+.list-item:last-child { border-bottom: none; }
+.list-item:hover { background: var(--bg3); }
+.list-num {
+  font-size: 13px; font-weight: 700;
+  color: var(--naver-green); min-width: 24px;
+}
+.list-content { flex: 1; }
+.list-title { font-size: 15px; font-weight: 500; margin-bottom: 2px; }
+.list-meta { font-size: 13px; color: var(--text2); }
+.list-tag {
+  font-size: 12px; padding: 3px 9px; border-radius: 6px;
+  background: var(--badge-bg); color: var(--naver-green);
+  font-weight: 600; flex-shrink: 0;
+}
+
+/* ── 스탯 바 ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px; margin-bottom: 32px;
+}
+@media (max-width: 600px) { .stat-grid { grid-template-columns: 1fr 1fr; } }
+
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  transition: all var(--transition);
+}
+.stat-card:hover { box-shadow: var(--shadow); }
+.stat-label { font-size: 13px; color: var(--text2); margin-bottom: 8px; font-weight: 500; }
+.stat-value { font-size: 26px; font-weight: 700; color: var(--text0); letter-spacing: -.04em; }
+.stat-value span { font-size: 14px; font-weight: 500; color: var(--text1); margin-left: 2px; }
+.stat-change { font-size: 12px; margin-top: 4px; }
+.stat-up { color: #e05555; }
+.stat-down { color: #3b82f6; }
+
+/* ── 입력창 ── */
+.search-bar {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex; align-items: center;
+  padding: 12px 16px; gap: 10px;
+  margin-bottom: 20px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.search-bar:focus-within {
+  border-color: var(--naver-green);
+  box-shadow: 0 0 0 3px rgba(3,199,90,.12);
+}
+.search-bar input {
+  flex: 1; border: none; background: transparent;
+  font-size: 16px; font-family: var(--font);
+  color: var(--text0); outline: none;
+}
+.search-bar input::placeholder { color: var(--text2); }
+.search-icon { font-size: 18px; color: var(--text2); flex-shrink: 0; }
+.search-btn {
+  background: var(--naver-green); color: #fff;
+  border: none; border-radius: 7px;
+  padding: 7px 16px; font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+  transition: background .2s;
+}
+.search-btn:hover { background: var(--naver-green2); }
+
+/* ── 알림 배지 ── */
+.notif-badge {
+  background: var(--badge-bg);
+  border: 1px solid rgba(3,199,90,.25);
+  border-radius: 8px; padding: 10px 16px;
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; font-size: 14px;
+  color: var(--text1);
+}
+.notif-icon { font-size: 18px; }
+.notif-text strong { color: var(--naver-green); }
+
+/* ── 푸터 ── */
+footer {
+  border-top: 1px solid var(--border);
+  text-align: center;
+  padding: 24px;
+  font-size: 13px;
+  color: var(--text2);
+  transition: border-color var(--transition);
+}
+
+/* ── 스크롤바 ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- 탑바 -->
+<div id="topbar">
+  <div class="logo">
+    <div class="logo-dot"></div>
+    Haru Studio
+  </div>
+  <div class="topbar-spacer"></div>
+  <div id="theme-switcher">
+    <button class="theme-btn active" id="btn-dark" onclick="setTheme('dark')">🌙 다크</button>
+    <button class="theme-btn" id="btn-white" onclick="setTheme('white')">☀️ 화이트</button>
+    <button class="theme-btn" id="btn-warm" onclick="setTheme('warm')">🕯 웜</button>
+  </div>
+</div>
+
+<!-- 메인 -->
+<div id="main">
+
+  <!-- 알림 -->
+  <div class="notif-badge">
+    <span class="notif-icon">✦</span>
+    <span class="notif-text"><strong>골든타임 전략</strong>이 현재 시각 기준으로 자동 설정되었어요. 지금 바로 키워드를 탐색해보세요.</span>
+  </div>
+
+  <!-- 히어로 배너 -->
+  <div id="hero">
+    <div class="hero-eyebrow">네이버 블로그 자동화 워크스테이션</div>
+    <div class="hero-title">AI가 대신 써주는<br/>고수익 블로그 포스팅</div>
+    <div class="hero-sub">키워드 하나로 SEO 최적화된 원고, 이미지, 해시태그까지 완성됩니다.</div>
+    <div class="hero-actions">
+      <button class="btn-primary" onclick="alert('원고 생성 시작!')">✦ 원고 생성 시작</button>
+      <button class="btn-ghost">📊 키워드 분석</button>
+    </div>
+  </div>
+
+  <!-- 스탯 -->
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">오늘 생성 원고</div>
+      <div class="stat-value">7<span>건</span></div>
+      <div class="stat-change stat-up">▲ 3건 증가</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Revenue Score</div>
+      <div class="stat-value">84<span>pt</span></div>
+      <div class="stat-change stat-up">▲ HIGH VALUE</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">평균 키워드 검색량</div>
+      <div class="stat-value">12K<span>/월</span></div>
+      <div class="stat-change stat-down">▼ 이전 대비 -2K</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">이미지 생성</div>
+      <div class="stat-value">21<span>장</span></div>
+      <div class="stat-change stat-up">▲ 썸네일 포함</div>
+    </div>
+  </div>
+
+  <!-- 키워드 검색 -->
+  <div class="section-header">
+    <div class="section-title">키워드 탐색</div>
+  </div>
+  <div class="search-bar">
+    <span class="search-icon">🔍</span>
+    <input type="text" placeholder="시드 키워드를 입력하세요 (예: 오메가3 효능)"/>
+    <button class="search-btn">SearchAds 조회</button>
+  </div>
+
+  <!-- 트렌드 키워드 칩 -->
+  <div class="keyword-row">
+    <div class="keyword-chip active"><span class="rank">1</span>건강기능식품 추천</div>
+    <div class="keyword-chip"><span class="rank">2</span>오메가3 효능</div>
+    <div class="keyword-chip"><span class="rank">3</span>프로바이오틱스 비교</div>
+    <div class="keyword-chip"><span class="rank">4</span>비타민D 부족 증상</div>
+    <div class="keyword-chip"><span class="rank">5</span>마그네슘 효과</div>
+    <div class="keyword-chip"><span class="rank">6</span>루테인 눈건강</div>
+    <div class="keyword-chip"><span class="rank">7</span>콜라겐 섭취</div>
+  </div>
+
+  <!-- 기능 카드 -->
+  <div class="section-header">
+    <div class="section-title">주요 기능</div>
+    <span class="section-more">전체보기 ›</span>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">✍️</div>
+      <div class="card-title">AI 원고 생성</div>
+      <div class="card-desc">Claude + Gemini 하이브리드로 E-E-A-T 최적화 원고를 자동 작성합니다.</div>
+      <div class="card-badge">NEW</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">🖼️</div>
+      <div class="card-title">DALL-E 이미지</div>
+      <div class="card-desc">썸네일 2장 + 본문 이미지 5장을 병렬로 자동 생성합니다.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <div class="card-title">키워드 인텔리전스</div>
+      <div class="card-desc">SearchAds + DataLab 연동으로 고수익 키워드를 자동 탐색합니다.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">🛒</div>
+      <div class="card-title">쇼핑 키워드</div>
+      <div class="card-desc">구매 퍼널 단계별 네이버 쇼핑 최적화 키워드를 추출합니다.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">⏰</div>
+      <div class="card-title">골든타임 전략</div>
+      <div class="card-desc">Morning / Lunch / Night 시간대별 최적 발행 전략을 자동 적용합니다.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">💰</div>
+      <div class="card-title">Revenue 관리</div>
+      <div class="card-desc">수익 링크 장전 및 CTA 박스 자동 삽입으로 수익을 극대화합니다.</div>
+    </div>
+  </div>
+
+  <!-- 최근 발행 리스트 -->
+  <div class="section-header">
+    <div class="section-title">최근 발행 원고</div>
+    <span class="section-more">전체보기 ›</span>
+  </div>
+  <div class="list-card">
+    <div class="list-item">
+      <div class="list-num">1</div>
+      <div class="list-content">
+        <div class="list-title">오메가3 영양제 추천 TOP 5 — 직접 먹어보고 비교했어요</div>
+        <div class="list-meta">2026.04.26 · Score 84 · 태그 5개</div>
+      </div>
+      <div class="list-tag">HIGH</div>
+    </div>
+    <div class="list-item">
+      <div class="list-num">2</div>
+      <div class="list-content">
+        <div class="list-title">프로바이오틱스 효능 완벽 정리 — 유산균 고르는 법</div>
+        <div class="list-meta">2026.04.25 · Score 72 · 태그 5개</div>
+      </div>
+      <div class="list-tag">GOOD</div>
+    </div>
+    <div class="list-item">
+      <div class="list-num">3</div>
+      <div class="list-content">
+        <div class="list-title">비타민D 부족 증상 7가지 — 이거 알면 무조건 보충해야 해요</div>
+        <div class="list-meta">2026.04.24 · Score 68 · 태그 5개</div>
+      </div>
+      <div class="list-tag">GOOD</div>
+    </div>
+    <div class="list-item">
+      <div class="list-num">4</div>
+      <div class="list-content">
+        <div class="list-title">마그네슘 복용법 — 수면과 스트레스에 실제로 효과 있을까?</div>
+        <div class="list-meta">2026.04.23 · Score 61 · 태그 5개</div>
+      </div>
+      <div class="list-tag">GOOD</div>
+    </div>
+    <div class="list-item">
+      <div class="list-num">5</div>
+      <div class="list-content">
+        <div class="list-title">루테인 눈 건강 영양제 — 직장인이 꼭 먹어야 하는 이유</div>
+        <div class="list-meta">2026.04.22 · Score 55 · 태그 5개</div>
+      </div>
+      <div class="list-tag">NORM</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 푸터 -->
+<footer>
+  ✦ Haru Studio v1.0 — 네이버 블로그 자동화 워크스테이션<br/>
+  Powered by Claude · Gemini · DALL-E · Naver API
+</footer>
+
+<script>
+function setTheme(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  localStorage.setItem('haru_theme', mode);
+  ['dark','white','warm'].forEach(m => {
+    document.getElementById('btn-' + m).classList.toggle('active', m === mode);
+  });
+}
+
+// 키워드 칩 토글
+document.querySelectorAll('.keyword-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.keyword-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+  });
+});
+
+// 저장된 테마 복원
+const saved = localStorage.getItem('haru_theme') || 'dark';
+setTheme(saved);
+</script>
+</body>
+</html>

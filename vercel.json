@@ -1,0 +1,14 @@
+{
+  "builds": [
+    {
+      "src": "naver_blog_v01.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "naver_blog_v01.py"
+    }
+  ]
+}

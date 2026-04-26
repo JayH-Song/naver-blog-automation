@@ -1,0 +1,179 @@
+[네이버 블로그 포스팅 작성 작업 명세서 및 지침서]
+
+1. 글 작성자의 페르소나 설정
+  가. 시작 페이지에서 사용자가 직접 입력할 수 있는 창이 있어야하고, 사용자가 입력하면 그에 맞게 페르소나가 세팅 되어야 햠
+  나. 직업, 연령, 경력배경, 가족 서사 등을 직접 입력할 수 있게 세팅
+  다. 초기 세팅 후에는 다시 묻지 안되, 사용자가 변경하고 싶으면 변경할 수 있는 기능을 추가해줘
+
+2. 주제선정 : 주제 선정은 최신트렌드에 맞게 선정 할 수 있도록 다음의 세가지방법을 사용해야해
+  가. Naver searchAds API : 시드키워드 입력 --> 연관키워드+모바일 검색랑 top7 반환
+
+  나. Naver DataLab API : 최근 3일 트랜드 접수 집계하여 top7 반환, Smart
+
+  다. 사용자가 직접 입력 
+
+  라. 제약 조건 
+    - backups/ 폴더(생성필요) 14일 이내 발행 키워드 자동 제외
+
+  마. 주제 선정시 Revenue Score 피드백 루프
+    - revenue_log(생성 필요) 테이블 조회 → 고수익 키워드 목록 로드
+    - 폴백: backups/*.json 스캔 (posted 여부 무관, 최근 50개)
+    - 완전 일치: base_score × 1.20 (+20% 가중치)
+    - 부분 포함: base_score × 1.10 (+10% 가중치)
+    - 고수익 매칭 시 → Claude 프롬프트에 Revenue Priority 지시문 추가 주입
+
+3. 글작성 설정
+  가.운영자 설정 선택   
+    - 스타일(선택기능 제공): 정보형 / 경험담 / 꿀팁 / 리뷰 / Q&A형 / 비교분석 / 제품비교분석형
+    - 말투(선택기능 제공): 따뜻하고 친근한 / 전문적이고 신뢰감 있는 / 감성적이고 공감하는 / 유쾌하고 재미있는 
+    - 수익 CTA 박스 삽입 여부: 토글 ON/OFF — 기본 On
+  나. 원고 생성
+    - 사용 AI : Claude 4.5 Sonnet
+
+  다. 원고 작성시 프롬프트 구성 레이어
+    - Revenue Priority : 고수익 키워드 매칭 시 가중치 지시문 (+20%/+10%)
+    - 골든타임 전략 : Morning·Lunch·Night 시간대별 SEO 전략 지시문 제공, 단, 사용자가 선택할 수 있는 옵션 제공
+      ㅇ Morning Rush : 시간대 07:30~09:00, 분량 1500자, 트렌드 TOP 1, 정보형, 스낵 콘텐츠
+      ㅇ Lunch Break : 시간대 10:30~13:00, 분량 2500자, 구매 의도 키워드, 제품비교분석형
+      ㅇ Night Focus : 시간대 19:30~23:00, 분량 3000자, 전문성, 경험담, 체류시간 극대화
+    - 페르소나 : 1.번에서 선정한 페르소나
+    - 작성 규칙 기본 : 스타일·말투·소제목 기호(★/■)·이모지 절제
+    - AI 티 제거 규칙 : 금지 접속어·금지 표현·인간 문체 필수 규칙
+      ㅇ 금지 접속어 : '첫째/둘째/셋째', '결론적으로', '게다가', '마지막으로', '또한', '따라서'
+      ㅇ 금지 표현 : '살펴보겠습니다', '알아보겠습니다', '도움이 될 수 있습니다', '본 포스팅에서는'
+      ㅇ 대체 표현 : '우선은요,', '그리고 진짜 중요한 게 있는데,', '그래서 결론은!', '오늘은요,'
+      ㅇ 종결 어미 : '~해요,', '~거든요,', '~인 것 같아요.', '~하더라고요.' 혼용 필수
+      ㅇ 자기수정 마커 :'아, 이건 제가 직접 겪어보고 느낀 건데,', '사실 저도 처음엔 좀 의심했었거든요.'
+      ㅇ 페르소나 직업의 일화 : 소제목 단락마다 1문장 의무 삽입 (병동·재활·항암 경험 등)
+
+    - 법적 준수사항 : 의료법·건강기능식품법 — 단정적 효능 표현 금지
+    - 분량 준수 : 섹션별 목표 글자, 자기 점검 강제
+    - (매우중요)  SEO/GEO 최적화 : 제목 공식·서론 키워드 배치·Key Point 박스·FAQ
+    - 내부 링크 : Actual Post History 목록에서만 3개 선택 (환각 금지), 제목옆에 해당글의 url을 입력할 수 있는 기능 추가하고, 하이퍼링크 적용
+    - 출력 JSON 형식 : title·content(HTML)·tags 구조 명세
+
+4. 이미지 생성 및 삽입
+  가. 이미지 종류 및 갯수
+    - 썸네일 용 이미지 : 2개 제공
+    - 본문 삽입용 이미지 : 5개 제공
+  나. 본문 분석 및 키워드 추출 AI : Gemini 3.1 Pro API 
+    - 썸네일 용 키워드 : {블로그_제목}, {스타일_키워드},{메인_문구}, {글꼴_스타일} 기본으로 추출, 그외 썸네일 제작용 키워드 추출
+    - 본문 삽입용 실사 이미지 키워드 : {핵심_피사체}, {상세_묘사}, {배경_묘사} 기본으로 추출, 그외 본문 삽입 이미지용 키워드 추출
+
+  다. 썸네일 생성: DALL-E 4 API (텍스트가 포함된 제목 이미지 생성)
+    [프롬프트]
+    "A professional blog thumbnail for a post titled '{블로그_제목}'. The design should be {스타일_키워드}. Place the text '{메인_문구}' clearly in the center using a {글꼴_스타일} font with high contrast against the background. Ensure the text is accurately spelled in Korean. Cinematic lighting, 16:9 aspect ratio, high resolution, 8k, minimalist but impactful."
+
+  라. 본문 삽입용 실사 이미지: DALL-E 4 API
+     [프롬프트]
+    "A high-end commercial photo of {핵심_피사체}. {상세_묘사}. Shot on 35mm lens, f/1.8, cinematic lighting, sharp focus, hyper-realistic textures. Background is {배경_묘사}. Professional studio lighting, 8k resolution, highly detailed."
+
+  마. 저장
+    - 생성후 저장 경로 : outputs/images/ 
+    - 파일명 : 생성날짜_종류_주제_넘버링 형태 : 예. yyyymmdd_title_주제_01, yyyymmdd_main_주제_01
+  
+  바. 블로그 에디터 내 AI 이미지 생성 및 선택 삽입 기능 구현
+    - 기술 스택:
+      ㅇ Backend: Python (FastAPI)
+      ㅇ Frontend: HTML5, Tailwind CSS, Vanilla JavaScript
+    - Editor: Tiptap 또는 Quill (가장 가벼운 WYSIWYG 에디터 추천)
+    - 핵심 요구 기능:
+      ㅇ 이미지 생성 컨트롤: 에디터 옆에 프롬프트 입력창과 '이미지 생성' 버튼이 있어야 함. 
+      ㅇ 생성 대기 UI: API 호출 중에는 스켈레톤 UI나 로딩 스피너를 표시함.
+      ㅇ 이미지 갤러리: 생성된 이미지(기본 3~4장)를 썸네일 리스트로 표시함. 
+      ㅇ 본문 삽입 로직: 갤러리의 이미지를 클릭하거나 '추가' 버튼을 누르면, 에디터의 현재 커서 위치에 <img> 태그로 해당 이미지가 삽입되어야 함.
+      ㅇ 저장 처리: 생성된 이미지는 로컬 폴더(/static/generated/)에 저장되고, 웹 페이지는 이 로컬 경로를 참조해야 함.
+      ㅇ 코드 구조 요구사항 : 복잡한 프레임워크 대신 단일 HTML 파일(스크립트 포함)과 단일 Python 파일로 작동하는 신뢰성 높은 코드를 작성해 줘.
+      ㅇ API 키는 .env 파일에서 불러오도록 설정해 줘.
+      ㅇ 에디터와 이미지 갤러리는 3단 레이아웃(죄측 : 페르소나, 주제선정 입력, 중단 : 이미지 생성 옵션, 우측: 최종 결과물)
+
+5. 후처리 — 쇼핑 키워드, Engagement 모듈
+  가. 쇼핑키워드 추출 AI : Gemini 3.1 Pro
+    - 구매 퍼널 단계별 키워드 5개 추출 (인지·관심·구매 고려)
+    - AI 추천 타겟 상품 1개 추천 → _target_product 저장
+    - 출력: {keywords: [...], target_product: '...'} JSON
+
+  나. Engagement 모듈 (CTA, 질문, 후킹) 작업 AI : Claude 4.5 Sonnet
+    - 자가진단 체크리스트 : 서론 첫 </p> 직후, 항상 삽입, 주제 관련 5항목 체크리스트 — 독자 관여도 향상
+    - CTA박스 : 2번째 소제목 직후, 3-가.항에서 토글 On(기본)시만, 희소성·앵커링 심리 트리거 멘트 + revenue-link 앵커 태그
+    - 제품 비교표 : 본문 50% 지점, 70%, 마지막 등 랜덤으로 위치 지정, 제품비교분석형만, 성분·성능·가성비 수치화 + 작성자(페르소나) 5점 평가
+    - FAQ : 항상 삽입, 지식iN 스타일 3문항, GEO 스니펫 최적화 
+    - 핵심요약 : 본문 맨끝, 항상 삽입, 본문에서 3~5 줄 추출(랜덤), 그라데이션 카드 형태(색상은 본문 내용에 맞춰 랜덤 적용) 
+            
+6. 저장 및 보고(테이블 명 : 저장 내용)
+   가. 로그 저장 테이블
+    - pipeline_runs : 실행 이력 — status·step 실시간 업데이트 → Realtime 웹 스트리밍
+    - pipeline_logs : 단계별 로그 INSERT → Supabase Realtime → 웹 대시보드 실시
+    - revenue_log : 클릭·판매 이벤트 기록 → Revenue Score 피드백 루프
+    - blog_cozy_haru.log : 전체 실행 로그
+
+  나. 로컬 파일 저장 경로
+    - backups/blog_YYYYMMDD_HHMMSS.json : 원고 메타데이터 + 발행 여부 (Smart Exclusion 기준 데이터)
+    - outputs/blog_YYYYMMDD_HHMMSS.txt : 사람이 읽기 쉬운 포맷 (Telegram 첨부 발송용)
+    - outputs/images/YYYYMMDD_주제/ : 4-바.항에 따라 생셩된 이미지
+
+7. 원클릭 수확 대시보드 및 발행
+  ① 제목 복사: navigator.clipboard.writeText() (plain text)
+  ② 해시태그 복사: #태그 형식 전체 복사
+  ③ 쇼핑 키워드: AI 추천 타겟 상품 + 추천 키워드 5개 표시
+  ④ 본문 복사: ClipboardItem API (text/html MIME) → 네이버 스마트에디터 서식 보존 붙여넣기
+  ⑤ Revenue Link 주입: Brand Connect URL 또는 Smart Store URL → .revenue-link href ARMED
+  ⑥ UX 안전 가드: 링크 미장전 상태에서 본문 복사 시 confirm 경고
+  ⑦ 수익 최적화 지표: HIGH-VALUE 배지 + Revenue Score 프로그레스 바
+
+8. UX/UI 가이드
+  가.전체 레이아웃 구조 (IDE Style 2:6:2)
+    - 좌측 사이드바 (20%): [Strategy & Context] 입력 및 데이터 탐색 영역
+    - 중앙 메인 패널 (60%): [Workstation] 실시간 원고 집필 및 편집 에디터 영역 (Max-width: 800px 최적화)
+    - 우측 가젯 패널 (20%): [Inspector & Assets] AI 이미지 갤러리 및 후처리 도구 영역 (토글 가능)
+    - 하단 터미널 (Fixed): [Pipeline Logs] 실시간 작업 진행 상태 스트리밍 영역
+
+  나. 기능별 상세 UX/UI 가이드
+    - 1단계: 페르소나 설정 (Context Setting)
+      ㅇ UI: 좌측 상단에 고정된 'Persona Card' 배치.
+      ㅇ UX: 최초 입력 후 '배지' 형태로 요약 표시. 클릭 시 슬라이드 오버 창으로 수정.
+      ㅇ Secret Sauce: 선택된 페르소나의 성격에 따라 에디터의 포인트 컬러(네이비/베이지/그린 등)가 미세하게 변경되어 현재 '자아'를 시각적으로 동기화.
+
+    - 2단계: 주제 선정 (Smart Discovery)
+      ㅇ UI: Naver API 결과(Top 7)를 카드 그리드 형태로 나열.
+      ㅇ UX: 각 키워드에 Revenue Score 배지 부착.가중치 공식: $Base\_Score \times 1.20$ (완전 일치 시) 적용 여부 시각화.
+      ㅇ Smart Exclusion: 최근 14일 이내 발행 키워드는 '회색 처리' 또는 '숨김 토글' 지원.
+
+    - 3단계: 원고 생성 및 편집 (Main Editor)
+      ㅇ UI: Tiptap 기반 WYSIWYG 에디터. Claude 4.5가 생성하는 글이 실시간 스트리밍으로 타이핑됨.AI 티 제거 
+      ㅇ UI: 금지 접속어/표현 사용 시 에디터 내에서 약하게 강조(Highlight)하여 사용자가 최종 검토할 수 있도록 유도.
+      ㅇ 인라인 컨트롤: 소제목 단락 사이마다 [+] 버튼을 두어 '이미지 생성'이나 '일화 추가' 기능을 즉시 호출.
+
+    - 4단계: 이미지 생성 및 삽입 (Visual Assets)
+      ㅇ UI (우측 패널): DALL-E 4(썸네일)와 Imagen 4(본문) 갤러리.
+      ㅇ UX (Optimistic UI): 생성 버튼 클릭 시 에디터 내 해당 위치에 스켈레톤(Skeleton) 박스가 즉시 삽입되고, 생성이 완료되면 실제 이미지로 교체됨.
+      ㅇ 관리: 모든 이미지는 outputs/images/ 경로의 로컬 미리보기를 참조함.
+
+    - 5단계: 후처리 (Engagement & Shopping)
+      ㅇ UI (우측 패널 하단): Gemini가 추출한 쇼핑 키워드 및 타겟 상품 정보 표시.
+      ㅇ 자동 삽입: '자가진단 체크리스트', 'FAQ', '핵심요약 카드' 등을 원클릭으로 본문 적재적소에 배치.
+
+    - 6단계: 상태 관제 (Real-time Pipeline)
+      ㅇ UI (하단): Terminal 느낌의 텍스트 스트리밍창.
+      ㅇ UX: pipeline_runs 테이블과 연동하여 [Step 1: 주제 분석 중...], [Step 4: 이미지 렌더링 중...] 등의 상태를 실시간 프로그레스 바와 함께 표시.
+
+     - 7단계: 원클릭 수확 (Harvesting)
+      ㅇ UI (중앙 상단 고정): 'Harvest Bar' 배치.
+      ㅇ Secret Sauce (Safe Guard): '본문 복사' 클릭 시 [체크리스트 팝업] 작동. (수익 링크 장전 확인, 금지어 검수 완료 등) 모든 항목 체크 시에만 HTML 복사 활성화.
+
+  다. UX/UI 기술 가이드 요약
+    - State Management: 사용자의 모든 선택 사항(페르소나, 주제, 옵션)은 Zustand 또는 Vuex로 중앙 집중 관리하고, 브라우저 localStorage에 실시간 캐싱하여 새로고침 시에도 데이터 유지 필수.
+    - Real-time Streaming: FastAPI의 WebSockets를 사용하여 백엔드 로그를 프런트엔드 터미널에 딜레이 없이 전송할 것.
+    - Tiptap Custom Extensions: '쇼핑 CTA 박스', '제품 비교표', 'FAQ' 등은 Tiptap 커스텀 노드로 구현. 네이버 복사 시 서식 보존을 위해 모든 스타일은 Inline-CSS로 강제 주입할 것.
+    - Asset Management: 생성된 이미지 URL이 만료되기 전 서버 로컬(/static/generated/)로 즉시 다운로드하고, 프런트엔드는 로컬 정적 경로를 참조하도록 설계할 것.
+    - Optimistic UI: 이미지 생성 요청 시 서버 응답 전이라도 에디터에 '생성 중' 상태의 プレ이스홀더를 즉시 렌더링하여 사용자 경험 속도를 높일 것.
+
+9. 개발 시 특별 유의 사항
+  - Context Fragmentation 방지: Claude API 호출 시 페르소나 데이터와 주제 데이터를 유실 없이 전달할 것.
+  - Naver Compatibility: 최종 출력되는 HTML은 네이버 스마트에디터 one 이상에서 서식이 보존되도록 inline-style 위주로 구성할 것.
+  - Image Handling: 생성된 이미지는 서버 로컬 저장소(/static/generated/)에 저장 후 즉시 프론트엔드 갤러리에 업데이트할 것 (WebSocket 또는 Polling 사용).
+  - Smart Exclusion: backups/ 폴더 내 JSON 파일의 keyword 필드를 대소문자 구분 없이 매칭하여 중복 발행을 원천 차단할 것.
+  - Responsive Adaptability: 모바일 환경에서는 3단 레이아웃을 하단 탭 메뉴(전략/편집/도구)로 자동 전환하고, 에디터 영역을 최대화할 것.
+  - Image SEO Workflow: 모든 생성 이미지는 저장 시 WebP 최적화를 거치며, Gemini가 생성한 Alt Text를 포함한 <figure> 태그 형태로 삽입할 것.
+  - Fault Tolerance: 각 생성 단계(텍스트/이미지)는 독립적인 Retry 로직을 가지며, 중간 단계 실패가 전체 파이프라인 중단으로 이어지지 않도록 할 것.
+  - Draft Continuity: LocalStorage와 DB를 동기화하여 기기 간(PC-모바일) 작성 중인 데이터의 연속성을 보장할 것.
