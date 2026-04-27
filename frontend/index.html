@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Haru Studio — 블로그 워크스테이션</title>
+<script>
+(function(){
+  var t = localStorage.getItem('haru_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+<!-- v2: Bento UI -->
+
+<!-- Tiptap ESM (esm.sh - 공유 모듈 그래프, ?bundle 없이 ProseMirror 인스턴스 단일화) -->
+<script type="module">
+  try {
+    const [
+      coreM,
+      starterM,
+      underlineM,
+      linkM,
+      imageM,
+      highlightM,
+    ] = await Promise.all([
+      import('https://esm.sh/@tiptap/core@2.7.3'),
+      import('https://esm.sh/@tiptap/starter-kit@2.7.3'),
+      import('https://esm.sh/@tiptap/extension-underline@2.7.3'),
+      import('https://esm.sh/@tiptap/extension-link@2.7.3'),
+      import('https://esm.sh/@tiptap/extension-image@2.7.3'),
+      import('https://esm.sh/@tiptap/extension-highlight@2.7.3'),
+    ]);
+    window['@tiptap/core']                = coreM;
+    window['@tiptap/starter-kit']         = { StarterKit: starterM.default ?? starterM.StarterKit };
+    window['@tiptap/extension-underline'] = { Underline: underlineM.default ?? underlineM.Underline };
+    window['@tiptap/extension-link']      = { Link: linkM.default ?? linkM.Link };
+    window['@tiptap/extension-image']     = { Image: imageM.default ?? imageM.Image };
+    window['@tiptap/extension-highlight'] = { Highlight: highlightM.default ?? highlightM.Highlight };
+    window.dispatchEvent(new Event('tiptap-loaded'));
+  } catch(err) {
+    console.error('[Tiptap ESM load error]', err);
+    window.dispatchEvent(new CustomEvent('tiptap-load-error', { detail: err }));
+  }
+</script>
+
+<link rel="stylesheet" href="/assets/style.css">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+</head>
+<body>
+
+<!-- ════════════════════════════════════════
+     LOGIN OVERLAY
+════════════════════════════════════════ -->
+<div id="login-overlay" style="position:fixed;top:0;left:0;width:100%;height:100dvh;background:var(--bg1);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.3s;padding:20px;box-sizing:border-box;">
+  <div style="background:var(--card);padding:40px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);text-align:center;width:100%;max-width:320px;border:1px solid var(--border);box-sizing:border-box;">
+    <h1 style="font-size:24px;margin-bottom:8px;font-weight:700;color:var(--text);letter-spacing:-0.5px;">Haru Studio</h1>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">승인된 사용자만 접근할 수 있습니다.</p>
+    <input type="password" id="login-pwd" placeholder="비밀번호" onkeydown="if(event.key==='Enter') doLogin()" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border);background:var(--bg0);color:var(--text);margin-bottom:16px;box-sizing:border-box;outline:none;">
+    <button onclick="doLogin()" style="width:100%;padding:12px;border-radius:8px;background:var(--naver-green);color:#fff;border:none;cursor:pointer;font-weight:600;">입장하기</button>
+    <p id="login-err" style="color:var(--red);font-size:12px;margin-top:12px;display:none;">비밀번호가 일치하지 않습니다.</p>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════
+     HARVEST GUARD MODAL
+════════════════════════════════════════ -->
+<div id="harvest-modal">
+  <div class="modal-box">
+    <h3>발행 전 체크리스트</h3>
+    <div class="check-item" data-idx="0" onclick="toggleCheck(0)">
+      <div class="check-box"></div>
+      <div class="check-text">Revenue Link가 장전되었습니다 (.revenue-link href 확인)</div>
+    </div>
+    <div class="check-item" data-idx="1" onclick="toggleCheck(1)">
+      <div class="check-box"></div>
+      <div class="check-text">금지 접속어/표현 검수 완료 (하이라이트 없음)</div>
+    </div>
+    <div class="check-item" data-idx="2" onclick="toggleCheck(2)">
+      <div class="check-box"></div>
+      <div class="check-text">이미지 ALT 텍스트 삽입 확인</div>
+    </div>
+    <div class="check-item" data-idx="3" onclick="toggleCheck(3)">
+      <div class="check-box"></div>
+      <div class="check-text">FAQ / 핵심요약 카드 삽입 확인</div>
+    </div>
+    <div class="check-item" data-idx="4" onclick="toggleCheck(4)">
+      <div class="check-box"></div>
+      <div class="check-text">제목 SEO 최적화 확인 (키워드 포함)</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-sm" onclick="closeHarvestModal()">취소</button>
+      <button class="btn-sm btn-accent" id="confirm-copy-btn" onclick="doHtmlCopy()" disabled>블로그로 내보내기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     DRAWER BACKDROP (공통)
+════════════════════════════════════════ -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+
+<!-- ════════════════════════════════════════
+     PERSONA DRAWER (우측 슬라이드 / 모바일 Bottom Sheet)
+════════════════════════════════════════ -->
+<div class="side-drawer" id="persona-drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">페르소나 수정</span>
+    <button class="drawer-close-btn" onclick="closeDrawer()"><i data-lucide="x"></i></button>
+  </div>
+  <div class="drawer-body">
+    <div>
+      <div class="field-label">직업</div>
+      <input class="field-input" id="so-job" placeholder="페르소나에 사용할 직업을 입력하세요"/>
+    </div>
+    <div>
+      <div class="field-label">연령</div>
+      <input class="field-input" id="so-age" placeholder="예: 30대 초반"/>
+    </div>
+    <div>
+      <div class="field-label">경력 배경</div>
+      <textarea class="field-input" id="so-career" rows="3" placeholder="페르소나에 사용할 경력을 입력하세요"></textarea>
+    </div>
+    <div>
+      <div class="field-label">가족/그 외 페르소나 정보</div>
+      <textarea class="field-input" id="so-family" rows="3" placeholder="예: 4살 딸 육아 중, 남편은 IT 종사자"></textarea>
+    </div>
+    <div>
+      <div class="field-label">에디터 테마 컬러</div>
+      <div class="color-pickers" id="so-colors">
+        <div class="color-chip" style="background:#2cc4a0" data-color="#2cc4a0" onclick="setPersonaColor('#2cc4a0')"></div>
+        <div class="color-chip" style="background:#5b8dee" data-color="#5b8dee" onclick="setPersonaColor('#5b8dee')"></div>
+        <div class="color-chip" style="background:#9b7de8" data-color="#9b7de8" onclick="setPersonaColor('#9b7de8')"></div>
+        <div class="color-chip" style="background:#f5a623" data-color="#f5a623" onclick="setPersonaColor('#f5a623')"></div>
+        <div class="color-chip" style="background:#e05595" data-color="#e05595" onclick="setPersonaColor('#e05595')"></div>
+        <div class="color-chip" style="background:#3dbb7a" data-color="#3dbb7a" onclick="setPersonaColor('#3dbb7a')"></div>
+      </div>
+    </div>
+    <button class="btn-sm btn-accent" onclick="savePersonaFromSlideover()" style="margin-top:4px">저장</button>
+    <button class="btn-sm" onclick="closeDrawer()">닫기</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     IMAGE DRAWER (우측 슬라이드 / 모바일 Bottom Sheet)
+     — 기존 #right 패널 내용 전체 이동
+════════════════════════════════════════ -->
+<div class="side-drawer" id="image-drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">AI 비주얼 & 에셋</span>
+    <button class="drawer-close-btn" onclick="closeDrawer()"><i data-lucide="x"></i></button>
+  </div>
+  <div class="drawer-body">
+
+    <!-- AI 이미지 생성 트리거 -->
+    <div>
+      <div class="section-title" style="margin-bottom:10px"><span><span class="dot"></span>VISUAL CONTEXT <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">AI 이미지</span></span></div>
+      <button id="img-gen-trigger-btn" onclick="triggerImageGeneration()"
+        style="width:100%;background:var(--naver-green);border:none;color:#fff;font-weight:700;
+               font-size:14px;padding:11px 16px;border-radius:var(--radius);cursor:pointer;
+               display:flex;align-items:center;justify-content:center;gap:8px;
+               font-family:var(--font-mono);transition:all var(--transition);margin-bottom:6px"
+        disabled>
+        <span id="img-btn-icon"><i data-lucide="sparkles"></i></span>
+        <span id="img-btn-label">AI 이미지 생성</span>
+        <div id="img-btn-spinner" class="spinner" style="display:none;width:14px;height:14px;
+          border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;
+          animation:spin .7s linear infinite"></div>
+      </button>
+      <p id="img-gen-hint" style="font-size:12px;color:var(--text2);text-align:center;margin:0 0 6px">글 빌드 후 활성화됩니다</p>
+      <button id="img-retry-btn" onclick="triggerImageGeneration()" style="display:none;
+        width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--amber);
+        font-size:12px;padding:7px;border-radius:var(--radius);cursor:pointer;margin-bottom:6px">
+        <i data-lucide="refresh-cw"></i> 이미지 다시 생성
+      </button>
+      <div class="field-label" style="margin-top:4px">추가 프롬프트 (선택)</div>
+      <div class="img-prompt-row">
+        <input id="img-prompt-input" class="field-input" placeholder="이미지 설명 입력..." style="font-size:13px;padding:7px 9px"/>
+      </div>
+    </div>
+
+    <!-- 썸네일 갤러리 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>THUMBNAILS</span></div>
+      <div class="img-gallery" id="thumb-gallery">
+        <div id="thumb-placeholder" style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
+      </div>
+    </div>
+
+    <!-- 본문 이미지 갤러리 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>BODY IMAGES</span></div>
+      <div id="body-gallery">
+        <div id="body-placeholder" style="text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
+      </div>
+    </div>
+
+    <!-- OSMU -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>MULTI-POSTING <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">멀티 포스팅</span></span></div>
+      <div id="osmu-placeholder" style="text-align:center;padding:12px;color:var(--text2);font-size:13px">글 빌드 후 멀티 포스팅 팩이 표시됩니다</div>
+      <div id="osmu-content" style="display:none;flex-direction:column;gap:10px">
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--text0);display:flex;align-items:center;gap:5px"><i data-lucide="clapperboard"></i> 쇼츠/릴스 대본</span>
+            <button class="btn-sm" onclick="copyOSMU('youtube_shorts')" style="font-size:11px;padding:2px 6px">복사</button>
+          </div>
+          <textarea id="osmu-shorts" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+        </div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--text0);display:flex;align-items:center;gap:5px"><i data-lucide="smartphone"></i> 인스타 피드</span>
+            <button class="btn-sm" onclick="copyOSMU('instagram_feed')" style="font-size:11px;padding:2px 6px">복사</button>
+          </div>
+          <textarea id="osmu-insta" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 쇼핑 키워드 -->
+    <div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>SHOPPING KW</span></div>
+      <div id="target-product-area"></div>
+      <div class="shop-kw-list" id="shop-kw-list"></div>
+    </div>
+
+    <!-- 스마트 이미지 대시보드 -->
+    <div id="img-dashboard-panel">
+      <div class="section-title" style="margin-bottom:8px">
+        <span><span class="dot"></span>IMAGE DASHBOARD</span>
+        <button class="btn-sm" onclick="loadImageDashboard()" style="padding:2px 7px;display:inline-flex;align-items:center"><i data-lucide="refresh-cw"></i></button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn-sm btn-accent" onclick="openImageFolder()" style="flex:1;font-size:12px;padding:6px 0;display:inline-flex;align-items:center;justify-content:center;gap:4px"><i data-lucide="folder-open"></i> 작업 폴더 열기</button>
+        <label class="btn-sm" style="flex:1;font-size:12px;padding:6px 0;text-align:center;cursor:pointer">
+          ＋ 사진 추가
+          <input type="file" id="img-upload-input" accept="image/*" multiple style="display:none" onchange="uploadImages(this.files)"/>
+        </label>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button class="img-filter-btn active" data-filter="all" onclick="filterDashboard('all',this)">전체</button>
+        <button class="img-filter-btn" data-filter="generated" onclick="filterDashboard('generated',this)">AI 생성</button>
+        <button class="img-filter-btn" data-filter="uploaded" onclick="filterDashboard('uploaded',this)">업로드</button>
+      </div>
+      <div id="upload-progress" style="display:none;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px" id="upload-progress-label">업로드 중...</div>
+        <div style="height:4px;background:var(--bg4);border-radius:2px">
+          <div id="upload-progress-bar" style="height:100%;background:var(--naver-green);border-radius:2px;width:0%;transition:width .3s"></div>
+        </div>
+      </div>
+      <div id="img-dashboard-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:360px;overflow-y:auto;padding-right:2px">
+        <div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text2);font-size:13px" id="dashboard-empty">이미지가 없습니다</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 이미지 복사 토스트 (전역 fixed) -->
+<div id="img-copy-toast" style="display:none;position:fixed;bottom:68px;left:50%;transform:translateX(-50%);
+  background:#03C75A;color:#fff;padding:10px 20px;border-radius:24px;
+  font-size:13px;font-weight:600;z-index:9999;white-space:nowrap;
+  box-shadow:0 4px 20px rgba(3,199,90,.4);pointer-events:none">
+  ✓ 이미지가 복사되었습니다. 네이버 에디터에 Ctrl+V 하세요!
+</div>
+
+<!-- ════════════════════════════════════════
+     MAIN APP — Bento Grid
+════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ── TOPBAR ── -->
+  <div id="topbar">
+    <div class="logo"><span class="logo-primary">HARU</span><span class="logo-secondary">STUDIO</span><span class="logo-version">v2</span></div>
+    <div style="display:flex;align-items:center;gap:4px;margin-left:8px">
+      <button id="btn-dark"  onclick="setTheme('dark')"  title="다크 모드"
+        style="width:28px;height:28px;border-radius:10px;border:1px solid var(--naver-green);
+               cursor:pointer;display:flex;align-items:center;justify-content:center;
+               background:var(--naver-greenbg);color:var(--naver-green);transition:all var(--transition)"><i data-lucide="moon"></i></button>
+      <button id="btn-white" onclick="setTheme('white')" title="화이트 모드"
+        style="width:28px;height:28px;border-radius:10px;border:1px solid transparent;
+               cursor:pointer;display:flex;align-items:center;justify-content:center;
+               background:rgba(255,255,255,.04);color:var(--text1);transition:all var(--transition)"><i data-lucide="sun"></i></button>
+      <button id="btn-warm"  onclick="setTheme('warm')"  title="웜 모드"
+        style="width:28px;height:28px;border-radius:10px;border:1px solid transparent;
+               cursor:pointer;display:flex;align-items:center;justify-content:center;
+               background:rgba(255,255,255,.04);color:var(--text1);transition:all var(--transition)"><i data-lucide="lamp-desk"></i></button>
+    </div>
+    <div id="harvest-bar">
+      <div id="revenue-score-bar">
+        <span id="rev-score-label">Score 0</span>
+        <div class="bar"><div class="bar-fill" id="rev-bar-fill"></div></div>
+        <span id="high-value-badge" style="display:none" class="badge-high">HIGH-VALUE</span>
+      </div>
+      <button id="harvest-btn-title" class="harvest-btn" onclick="copyTitle()" disabled>제목 담기</button>
+      <button id="harvest-btn-tags"  class="harvest-btn" onclick="copyTags()"  disabled>태그 복사</button>
+      <button class="harvest-btn primary" onclick="openHarvestModal()">블로그로 내보내기</button>
+      <button class="harvest-btn img-trigger" onclick="openDrawer('image-drawer')" title="이미지 패널 열기"><i data-lucide="image"></i> 이미지</button>
+    </div>
+  </div>
+
+  <!-- ── LEFT SIDEBAR (bento-card) ── -->
+  <div id="left" class="bento-card">
+
+    <!-- Mobile: 드래그 핸들 바 + 닫기 버튼 -->
+    <div id="left-mobile-header">
+      <div id="left-drag-bar"></div>
+      <button id="left-mobile-close" onclick="closeDrawer()" aria-label="닫기"><i data-lucide="x"></i></button>
+    </div>
+
+    <!-- 1. Persona Card -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span><span class="dot"></span>MY PERSONA <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">나의 페르소나</span></span>
+        <span style="cursor:pointer;color:var(--text2);font-size:11px" onclick="openDrawer('persona-drawer')">수정</span>
+      </div>
+
+      <!-- 초기 설정 폼 (persona 없을 때) -->
+      <div id="persona-setup" style="display:flex">
+        <div>
+          <div class="field-label">직업</div>
+          <input class="field-input" id="p-job" placeholder="페르소나에 사용할 직업을 입력하세요"/>
+        </div>
+        <div>
+          <div class="field-label">연령</div>
+          <input class="field-input" id="p-age" placeholder="예: 30대 초반"/>
+        </div>
+        <div>
+          <div class="field-label">경력 배경</div>
+          <textarea class="field-input" id="p-career" rows="2" placeholder="페르소나에 사용할 경력을 입력하세요"></textarea>
+        </div>
+        <div>
+          <div class="field-label">가족/그 외 페르소나 정보</div>
+          <textarea class="field-input" id="p-family" rows="2" placeholder="예: 4살 딸 육아 중"></textarea>
+        </div>
+        <div>
+          <div class="field-label">테마 컬러</div>
+          <div class="color-pickers" id="p-colors">
+            <div class="color-chip active" style="background:#2cc4a0" data-color="#2cc4a0" onclick="selectInitColor('#2cc4a0', this)"></div>
+            <div class="color-chip" style="background:#5b8dee" data-color="#5b8dee" onclick="selectInitColor('#5b8dee', this)"></div>
+            <div class="color-chip" style="background:#9b7de8" data-color="#9b7de8" onclick="selectInitColor('#9b7de8', this)"></div>
+            <div class="color-chip" style="background:#f5a623" data-color="#f5a623" onclick="selectInitColor('#f5a623', this)"></div>
+            <div class="color-chip" style="background:#e05595" data-color="#e05595" onclick="selectInitColor('#e05595', this)"></div>
+            <div class="color-chip" style="background:#3dbb7a" data-color="#3dbb7a" onclick="selectInitColor('#3dbb7a', this)"></div>
+          </div>
+        </div>
+        <button class="btn-sm btn-accent" onclick="savePersona()" style="margin-top:4px">페르소나 저장</button>
+      </div>
+
+      <!-- 저장 후 배지 -->
+      <div id="persona-badge" style="display:none" onclick="openDrawer('persona-drawer')">
+        <div class="name" id="badge-name">—</div>
+        <div class="meta" id="badge-meta">—</div>
+      </div>
+    </div>
+
+    <!-- 2. Keyword Discovery -->
+    <div class="panel-section" style="flex:1">
+      <div class="section-title"><span><span class="dot"></span>TREND INSIGHT <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">트렌드 글감</span></span></div>
+      <div class="tab-group">
+        <div class="tab-btn active" id="tab-ads" onclick="setKwTab('ads')">SearchAds</div>
+        <div class="tab-btn" id="tab-lab" onclick="setKwTab('lab')">DataLab</div>
+        <div class="tab-btn" id="tab-manual" onclick="setKwTab('manual')">직접입력</div>
+      </div>
+
+      <div id="kw-ads-panel">
+        <div id="keyword-input-row">
+          <input class="field-input" id="seed-keyword" placeholder="시드 키워드" style="font-size:12px;padding:7px 9px"/>
+          <button class="btn-sm btn-accent" onclick="fetchAdsKeywords()">검색</button>
+        </div>
+      </div>
+      <div id="kw-lab-panel" style="display:none">
+        <button class="btn-sm btn-accent" onclick="fetchDatalabKeywords()" style="width:100%">최근 3일 트렌드 로드</button>
+      </div>
+      <div id="kw-manual-panel" style="display:none">
+        <input class="field-input" id="manual-keyword" placeholder="키워드 직접 입력" style="font-size:12px;padding:7px 9px"/>
+        <button class="btn-sm btn-accent" onclick="setManualKeyword()" style="width:100%;margin-top:6px">적용</button>
+      </div>
+
+      <div id="kw-source-badge" style="display:none;margin:4px 0 2px"></div>
+      <div class="keyword-cards" id="keyword-cards"></div>
+    </div>
+
+    <!-- 3. Write Config -->
+    <div class="panel-section">
+      <div class="section-title"><span><span class="dot"></span>WRITING STRATEGY <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">글쓰기 전략</span></span></div>
+      <div class="field-label" style="margin-top:4px">스타일</div>
+      <div class="select-pills" id="style-pills">
+        <div class="pill active" data-val="정보 큐레이션" onclick="setPill('style-pills', this)">정보 큐레이션</div>
+        <div class="pill" data-val="리얼 스토리" onclick="setPill('style-pills', this)">리얼 스토리</div>
+        <div class="pill" data-val="노하우 가이드" onclick="setPill('style-pills', this)">노하우 가이드</div>
+        <div class="pill" data-val="리뷰" onclick="setPill('style-pills', this)">리뷰</div>
+        <div class="pill" data-val="Q&A형" onclick="setPill('style-pills', this)">Q&A형</div>
+        <div class="pill" data-val="비교분석" onclick="setPill('style-pills', this)">비교분석</div>
+        <div class="pill" data-val="벤치마크 리포트" onclick="setPill('style-pills', this)">벤치마크</div>
+      </div>
+      <div class="field-label" style="margin-top:8px">Tone &amp; Manner</div>
+      <div class="select-pills" id="tone-pills">
+        <div class="pill active" data-val="친근하고 부드럽게" onclick="setPill('tone-pills', this)">친근·부드럽게</div>
+        <div class="pill" data-val="전문적이고 간결하게" onclick="setPill('tone-pills', this)">Expert</div>
+        <div class="pill" data-val="감성적이고 공감하는" onclick="setPill('tone-pills', this)">감성·공감</div>
+        <div class="pill" data-val="위트 있고 즐겁게" onclick="setPill('tone-pills', this)">위트·즐겁게</div>
+      </div>
+      <div class="field-label" style="margin-top:8px">골든타임 전략</div>
+      <div class="select-pills" id="gt-pills">
+        <div class="pill active" data-val="morning" onclick="setPill('gt-pills', this)">Morning · 1500자</div>
+        <div class="pill" data-val="lunch" onclick="setPill('gt-pills', this)">Lunch · 2500자</div>
+        <div class="pill" data-val="night" onclick="setPill('gt-pills', this)">Night · 3000자</div>
+        <div class="pill" data-val="custom" onclick="setPill('gt-pills', this)">Custom</div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">수익 CTA 박스</span>
+        <div class="toggle on" id="cta-toggle" onclick="toggleCta()"><div class="toggle-knob"></div></div>
+      </div>
+
+      <!-- Revenue Link -->
+      <div class="field-label" style="margin-top:4px">Revenue Link (수익 링크)</div>
+      <div class="revenue-link-row">
+        <input class="field-input" id="revenue-link-input" placeholder="https://link.naver.com/..." style="font-size:13px;padding:7px 9px"/>
+        <button class="btn-sm" onclick="armRevenueLink()">활성화</button>
+      </div>
+
+      <!-- Post History (내부 링크용) -->
+      <div class="field-label" style="margin-top:8px">내부 링크 목록 <span style="color:var(--text2);font-size:10px">(제목 + URL)</span></div>
+      <div id="post-history-list"></div>
+      <button class="btn-sm" onclick="addPostHistoryRow()" style="margin-top:5px;width:100%">+ 포스팅 추가</button>
+
+      <button id="gen-btn" onclick="generate()">
+        <div class="spinner"></div>
+        <i data-lucide="zap" class="gen-icon"></i>
+        <span id="gen-btn-text">글 빌드하기</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── CENTER EDITOR (bento-card) ── -->
+  <div id="center" class="bento-card">
+    <div id="editor-toolbar">
+      <button class="tb-btn" onclick="editor.chain().focus().toggleBold().run()" title="굵게"><b>B</b></button>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleItalic().run()" title="기울기"><i>I</i></button>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleUnderline().run()" title="밑줄"><u>U</u></button>
+      <div class="tb-sep"></div>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleHeading({level:2}).run()">H2</button>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleHeading({level:3}).run()">H3</button>
+      <div class="tb-sep"></div>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleBulletList().run()" title="글머리 기호"><i data-lucide="list"></i></button>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleOrderedList().run()" title="번호 목록"><i data-lucide="list-ordered"></i></button>
+      <button class="tb-btn" onclick="editor.chain().focus().toggleBlockquote().run()" title="인용구"><i data-lucide="quote"></i></button>
+      <div class="tb-sep"></div>
+      <button class="tb-btn" onclick="checkForbiddenWords()" title="원고 검수" style="color:var(--amber)">원고 검수</button>
+      <div class="tb-right">
+        <button class="tb-btn" onclick="insertEngagementBlock('checklist')" title="체크리스트 삽입"><i data-lucide="check-square"></i></button>
+        <button class="tb-btn" onclick="insertEngagementBlock('faq')" title="FAQ 삽입">FAQ</button>
+        <button class="tb-btn" onclick="insertEngagementBlock('summary')" title="핵심요약 삽입">요약</button>
+      </div>
+    </div>
+    <div id="editor-wrapper">
+      <div id="editor"></div>
+    </div>
+  </div>
+
+  <!-- ── TERMINAL ── -->
+  <div id="terminal">
+    <div id="term-header">
+      <div class="term-dot" style="background:#e05555"></div>
+      <div class="term-dot" style="background:#f5a623"></div>
+      <div class="term-dot" style="background:#3dbb7a"></div>
+      <span style="font-family:var(--font-mono);font-size:14px;color:var(--text2);margin-left:8px">TASK LOG <span style="font-size:11px;font-weight:400">작업 로그</span></span>
+      <button class="btn-sm" style="margin-left:auto;font-size:13px;padding:3px 8px" onclick="clearTerminal()">clear</button>
+    </div>
+    <div id="progress-bar"><div id="progress-fill"></div></div>
+    <div id="term-log"></div>
+  </div>
+
+</div>
+
+<!-- Mobile Tab Bar -->
+<div class="mobile-tabs" id="mobile-tabs">
+  <div class="mobile-tab" data-panel="left" onclick="showMobileTab('left')">
+    <span class="tab-icon"><i data-lucide="settings-2"></i></span><span class="tab-label">전략</span>
+  </div>
+  <div class="mobile-tab active" data-panel="center" onclick="showMobileTab('center')">
+    <span class="tab-icon"><i data-lucide="pen-line"></i></span><span class="tab-label">편집</span>
+  </div>
+  <div class="mobile-tab" data-panel="images" onclick="showMobileTab('images')">
+    <span class="tab-icon"><i data-lucide="image"></i></span><span class="tab-label">이미지</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     JAVASCRIPT
+════════════════════════════════════════ -->
+<script src="/assets/main.js" defer></script>
+<script>document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });</script>
+</body>
+</html>
