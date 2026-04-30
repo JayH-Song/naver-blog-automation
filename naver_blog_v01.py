@@ -2123,7 +2123,7 @@ async def api_generate(req: GenerateRequest):
         # ▶ Claude Haiku + 실시간 뉴스 팩트 컨텍스트 + 개인 관심사
         article = await generate_article(
             run_id, req.persona, req.keyword,
-            req.config, req.post_history, match, req.revenue_link,
+            req.config, req.post_history, match,
             news_context=news_context,
             user_context=req.user_context or "",
         )
