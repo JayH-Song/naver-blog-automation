@@ -214,6 +214,7 @@ class GenerateRequest(BaseModel):
     user_context: Optional[str] = ""   # 키워드 관련 개인 경험/관심사 (선택)
     config: WriteConfig
     post_history: Optional[List[dict]] = []   # [{title, url}]
+    revenue_link: Optional[str] = ""
 
 class ImageGenRequest(BaseModel):
     keyword: str
