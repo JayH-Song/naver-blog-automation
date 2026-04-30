@@ -69,25 +69,33 @@
 <div id="harvest-modal">
   <div class="modal-box">
     <h3>발행 전 체크리스트</h3>
-    <div class="check-item" data-idx="0" onclick="toggleCheck(0)">
-      <div class="check-box"></div>
-      <div class="check-text">Revenue Link가 장전되었습니다 (.revenue-link href 확인)</div>
+    <div id="harvest-title-row">
+      <label class="harvest-title-label">포스팅 제목</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="harvest-title-input" class="harvest-title-input"
+               placeholder="제목을 입력하세요"
+               oninput="onHarvestTitleInput(this.value)"/>
+        <button class="btn-sm" onclick="copyHarvestTitle()" title="제목 복사" style="flex-shrink:0">복사</button>
+      </div>
     </div>
-    <div class="check-item" data-idx="1" onclick="toggleCheck(1)">
+    <div id="harvest-summary"></div>
+    <div class="check-item" data-idx="0">
       <div class="check-box"></div>
       <div class="check-text">금지 접속어/표현 검수 완료 (하이라이트 없음)</div>
+      <button class="fix-btn" onclick="fixCheck(0, event)">금지어 삭제</button>
+      <span class="check-status"></span>
     </div>
-    <div class="check-item" data-idx="2" onclick="toggleCheck(2)">
-      <div class="check-box"></div>
-      <div class="check-text">이미지 ALT 텍스트 삽입 확인</div>
-    </div>
-    <div class="check-item" data-idx="3" onclick="toggleCheck(3)">
+    <div class="check-item" data-idx="1">
       <div class="check-box"></div>
       <div class="check-text">FAQ / 핵심요약 카드 삽입 확인</div>
+      <button class="fix-btn" onclick="fixCheck(1, event)">FAQ 삽입</button>
+      <span class="check-status"></span>
     </div>
-    <div class="check-item" data-idx="4" onclick="toggleCheck(4)">
+    <div class="check-item" data-idx="2">
       <div class="check-box"></div>
       <div class="check-text">제목 SEO 최적화 확인 (키워드 포함)</div>
+      <button class="fix-btn" onclick="fixCheck(2, event)">제목 보정</button>
+      <span class="check-status"></span>
     </div>
     <div class="modal-actions">
       <button class="btn-sm" onclick="closeHarvestModal()">취소</button>
@@ -155,7 +163,7 @@
 
     <!-- AI 이미지 생성 트리거 -->
     <div>
-      <div class="section-title" style="margin-bottom:10px"><span><span class="dot"></span>VISUAL CONTEXT <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">AI 이미지</span></span></div>
+      <div class="section-title" style="margin-bottom:10px"><span><span class="dot"></span>AI 이미지</span></div>
       <button id="img-gen-trigger-btn" onclick="triggerImageGeneration()"
         style="width:100%;background:var(--naver-green);border:none;color:#fff;font-weight:700;
                font-size:14px;padding:11px 16px;border-radius:var(--radius);cursor:pointer;
@@ -182,7 +190,7 @@
 
     <!-- 썸네일 갤러리 -->
     <div>
-      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>THUMBNAILS</span></div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>썸네일</span></div>
       <div class="img-gallery" id="thumb-gallery">
         <div id="thumb-placeholder" style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
       </div>
@@ -190,45 +198,17 @@
 
     <!-- 본문 이미지 갤러리 -->
     <div>
-      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>BODY IMAGES</span></div>
+      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>본문 이미지</span></div>
       <div id="body-gallery">
         <div id="body-placeholder" style="text-align:center;padding:16px;color:var(--text2);font-size:13px">이미지 생성 전입니다</div>
       </div>
     </div>
 
-    <!-- OSMU -->
-    <div>
-      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>MULTI-POSTING <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">멀티 포스팅</span></span></div>
-      <div id="osmu-placeholder" style="text-align:center;padding:12px;color:var(--text2);font-size:13px">글 빌드 후 멀티 포스팅 팩이 표시됩니다</div>
-      <div id="osmu-content" style="display:none;flex-direction:column;gap:10px">
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:600;color:var(--text0);display:flex;align-items:center;gap:5px"><i data-lucide="clapperboard"></i> 쇼츠/릴스 대본</span>
-            <button class="btn-sm" onclick="copyOSMU('youtube_shorts')" style="font-size:11px;padding:2px 6px">복사</button>
-          </div>
-          <textarea id="osmu-shorts" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
-        </div>
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:600;color:var(--text0);display:flex;align-items:center;gap:5px"><i data-lucide="smartphone"></i> 인스타 피드</span>
-            <button class="btn-sm" onclick="copyOSMU('instagram_feed')" style="font-size:11px;padding:2px 6px">복사</button>
-          </div>
-          <textarea id="osmu-insta" readonly style="width:100%;height:80px;background:transparent;border:none;color:var(--text1);font-size:12px;resize:none;outline:none"></textarea>
-        </div>
-      </div>
-    </div>
-
-    <!-- 쇼핑 키워드 -->
-    <div>
-      <div class="section-title" style="margin-bottom:8px"><span><span class="dot"></span>SHOPPING KW</span></div>
-      <div id="target-product-area"></div>
-      <div class="shop-kw-list" id="shop-kw-list"></div>
-    </div>
 
     <!-- 스마트 이미지 대시보드 -->
     <div id="img-dashboard-panel">
       <div class="section-title" style="margin-bottom:8px">
-        <span><span class="dot"></span>IMAGE DASHBOARD</span>
+        <span><span class="dot"></span>이미지 보관함</span>
         <button class="btn-sm" onclick="loadImageDashboard()" style="padding:2px 7px;display:inline-flex;align-items:center"><i data-lucide="refresh-cw"></i></button>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
@@ -291,12 +271,14 @@
       <div id="revenue-score-bar">
         <span id="rev-score-label">Score 0</span>
         <div class="bar"><div class="bar-fill" id="rev-bar-fill"></div></div>
-        <span id="high-value-badge" style="display:none" class="badge-high">HIGH-VALUE</span>
+        <span id="high-value-badge" style="display:none" class="badge-high">고수익</span>
       </div>
-      <button id="harvest-btn-title" class="harvest-btn" onclick="copyTitle()" disabled>제목 담기</button>
-      <button id="harvest-btn-tags"  class="harvest-btn" onclick="copyTags()"  disabled>태그 복사</button>
       <button class="harvest-btn primary" onclick="openHarvestModal()">블로그로 내보내기</button>
       <button class="harvest-btn img-trigger" onclick="openDrawer('image-drawer')" title="이미지 패널 열기"><i data-lucide="image"></i> 이미지</button>
+      <button class="harvest-btn" id="log-toggle-btn" onclick="toggleTerminal()" title="작업 로그">
+        <i data-lucide="terminal"></i> 작업 로그
+        <span id="log-unread-badge"></span>
+      </button>
     </div>
   </div>
 
@@ -312,7 +294,8 @@
     <!-- 1. Persona Card -->
     <div class="panel-section">
       <div class="section-title">
-        <span><span class="dot"></span>MY PERSONA <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">나의 페르소나</span></span>
+        <span><span class="dot"></span>내 페르소나</span>
+        <div id="persona-slots" class="persona-slots"></div>
         <span style="cursor:pointer;color:var(--text2);font-size:11px" onclick="openDrawer('persona-drawer')">수정</span>
       </div>
 
@@ -357,10 +340,10 @@
 
     <!-- 2. Keyword Discovery -->
     <div class="panel-section" style="flex:1">
-      <div class="section-title"><span><span class="dot"></span>TREND INSIGHT <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">트렌드 글감</span></span></div>
+      <div class="section-title"><span><span class="dot"></span>트렌드 키워드</span></div>
       <div class="tab-group">
-        <div class="tab-btn active" id="tab-ads" onclick="setKwTab('ads')">SearchAds</div>
-        <div class="tab-btn" id="tab-lab" onclick="setKwTab('lab')">DataLab</div>
+        <div class="tab-btn active" id="tab-ads" onclick="setKwTab('ads')">검색광고</div>
+        <div class="tab-btn" id="tab-lab" onclick="setKwTab('lab')">데이터랩</div>
         <div class="tab-btn" id="tab-manual" onclick="setKwTab('manual')">직접입력</div>
       </div>
 
@@ -382,9 +365,37 @@
       <div class="keyword-cards" id="keyword-cards"></div>
     </div>
 
-    <!-- 3. Write Config -->
+    <!-- 2-B. Personal Angle — 키워드 선택 후 노출 -->
+    <div class="panel-section" id="personal-context-section" style="display:none">
+      <div class="section-title">
+        <span><span class="dot" style="background:var(--indigo)"></span>나의 관심사</span>
+        <button class="btn-sm pc-skip-btn" onclick="skipPersonalContext()" title="건너뛰기">건너뛰기</button>
+      </div>
+      <p class="pc-prompt" id="personal-context-prompt"></p>
+      <textarea
+        id="personal-context-input"
+        class="field-input pc-textarea"
+        placeholder="예: 최근에 무릎 부상을 당해서 재활 중인데, 어떤 운동이 도움이 되는지 궁금해요. 주변에 비슷한 분들도 많아서..."
+        rows="4"
+        oninput="savePersonalContext()"
+      ></textarea>
+      <div class="pc-hint">입력한 경험·관심사를 글의 도입부와 소제목 각도에 반영하여 더 개인적이고 공감 가는 글을 작성합니다.</div>
+    </div>
+
+  </div>
+
+  <!-- ── RIGHT SIDEBAR (bento-card) ── -->
+  <div id="right" class="bento-card">
+
+    <!-- Mobile: 드래그 핸들 바 + 닫기 버튼 -->
+    <div id="right-mobile-header">
+      <div id="right-drag-bar"></div>
+      <button id="right-mobile-close" onclick="closeDrawer()" aria-label="닫기"><i data-lucide="x"></i></button>
+    </div>
+
+    <!-- Write Config -->
     <div class="panel-section">
-      <div class="section-title"><span><span class="dot"></span>WRITING STRATEGY <span style="color:var(--text2);font-size:10px;font-weight:400;letter-spacing:0">글쓰기 전략</span></span></div>
+      <div class="section-title"><span><span class="dot"></span>글 스타일</span></div>
       <div class="field-label" style="margin-top:4px">스타일</div>
       <div class="select-pills" id="style-pills">
         <div class="pill active" data-val="정보 큐레이션" onclick="setPill('style-pills', this)">정보 큐레이션</div>
@@ -395,37 +406,40 @@
         <div class="pill" data-val="비교분석" onclick="setPill('style-pills', this)">비교분석</div>
         <div class="pill" data-val="벤치마크 리포트" onclick="setPill('style-pills', this)">벤치마크</div>
       </div>
-      <div class="field-label" style="margin-top:8px">Tone &amp; Manner</div>
+      <div class="field-label" style="margin-top:12px">톤 &amp; 매너</div>
       <div class="select-pills" id="tone-pills">
         <div class="pill active" data-val="친근하고 부드럽게" onclick="setPill('tone-pills', this)">친근·부드럽게</div>
         <div class="pill" data-val="전문적이고 간결하게" onclick="setPill('tone-pills', this)">Expert</div>
         <div class="pill" data-val="감성적이고 공감하는" onclick="setPill('tone-pills', this)">감성·공감</div>
         <div class="pill" data-val="위트 있고 즐겁게" onclick="setPill('tone-pills', this)">위트·즐겁게</div>
       </div>
-      <div class="field-label" style="margin-top:8px">골든타임 전략</div>
+      <div class="field-label" style="margin-top:12px">골든타임 전략</div>
       <div class="select-pills" id="gt-pills">
-        <div class="pill active" data-val="morning" onclick="setPill('gt-pills', this)">Morning · 1500자</div>
-        <div class="pill" data-val="lunch" onclick="setPill('gt-pills', this)">Lunch · 2500자</div>
-        <div class="pill" data-val="night" onclick="setPill('gt-pills', this)">Night · 3000자</div>
+        <div class="pill active" data-val="morning" onclick="setPill('gt-pills', this)">아침 · 1500자</div>
+        <div class="pill" data-val="lunch" onclick="setPill('gt-pills', this)">점심 · 2500자</div>
+        <div class="pill" data-val="night" onclick="setPill('gt-pills', this)">저녁 · 3000자</div>
         <div class="pill" data-val="custom" onclick="setPill('gt-pills', this)">Custom</div>
       </div>
-      <div class="toggle-row">
-        <span class="toggle-label">수익 CTA 박스</span>
-        <div class="toggle on" id="cta-toggle" onclick="toggleCta()"><div class="toggle-knob"></div></div>
-      </div>
+    </div>
 
-      <!-- Revenue Link -->
-      <div class="field-label" style="margin-top:4px">Revenue Link (수익 링크)</div>
-      <div class="revenue-link-row">
-        <input class="field-input" id="revenue-link-input" placeholder="https://link.naver.com/..." style="font-size:13px;padding:7px 9px"/>
-        <button class="btn-sm" onclick="armRevenueLink()">활성화</button>
-      </div>
+    <!-- 쇼핑 키워드 -->
+    <div class="panel-section" style="flex:1">
+      <div class="section-title"><span><span class="dot" style="background:var(--emerald)"></span>쇼핑 키워드</span></div>
+      <div id="target-product-area"></div>
+      <div class="shop-kw-list" id="shop-kw-list"></div>
+    </div>
 
-      <!-- Post History (내부 링크용) -->
-      <div class="field-label" style="margin-top:8px">내부 링크 목록 <span style="color:var(--text2);font-size:10px">(제목 + URL)</span></div>
+    <!-- Links -->
+    <div class="panel-section">
+      <div class="section-title"><span><span class="dot" style="background:var(--amber)"></span>내부 링크</span></div>
+      <div class="field-label">내부 링크 목록 <span style="color:var(--text2);font-size:11px">(제목 + URL)</span></div>
       <div id="post-history-list"></div>
-      <button class="btn-sm" onclick="addPostHistoryRow()" style="margin-top:5px;width:100%">+ 포스팅 추가</button>
+      <button class="btn-sm" onclick="addPostHistoryRow()" style="margin-top:8px;width:100%">+ 포스팅 추가</button>
+    </div>
 
+    <!-- Gen Button -->
+    <div class="panel-section">
+      <div id="pc-active-badge"></div>
       <button id="gen-btn" onclick="generate()">
         <div class="spinner"></div>
         <i data-lucide="zap" class="gen-icon"></i>
@@ -455,6 +469,15 @@
         <button class="tb-btn" onclick="insertEngagementBlock('summary')" title="핵심요약 삽입">요약</button>
       </div>
     </div>
+    <div id="article-title-bar">
+      <div class="article-title-inner">
+        <span class="article-title-label">제목 :</span>
+        <input id="article-title-input" class="article-title-input"
+               placeholder="글 빌드 후 자동 입력"
+               oninput="onArticleTitleInput(this.value)"/>
+        <button class="btn-sm article-title-copy-btn" onclick="copyArticleTitle()">복사</button>
+      </div>
+    </div>
     <div id="editor-wrapper">
       <div id="editor"></div>
     </div>
@@ -462,12 +485,15 @@
 
   <!-- ── TERMINAL ── -->
   <div id="terminal">
-    <div id="term-header">
+    <div id="term-header" onclick="toggleTerminal()">
       <div class="term-dot" style="background:#e05555"></div>
       <div class="term-dot" style="background:#f5a623"></div>
       <div class="term-dot" style="background:#3dbb7a"></div>
-      <span style="font-family:var(--font-mono);font-size:14px;color:var(--text2);margin-left:8px">TASK LOG <span style="font-size:11px;font-weight:400">작업 로그</span></span>
-      <button class="btn-sm" style="margin-left:auto;font-size:13px;padding:3px 8px" onclick="clearTerminal()">clear</button>
+      <span style="font-family:var(--font-mono);font-size:14px;color:var(--text2);margin-left:8px">작업 로그</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <button class="btn-sm" style="font-size:12px;padding:3px 8px" onclick="event.stopPropagation();clearTerminal()">지우기</button>
+        <button class="btn-sm" style="font-size:12px;padding:3px 8px" onclick="event.stopPropagation();toggleTerminal()"><i data-lucide="chevron-down"></i></button>
+      </div>
     </div>
     <div id="progress-bar"><div id="progress-fill"></div></div>
     <div id="term-log"></div>
@@ -478,13 +504,13 @@
 <!-- Mobile Tab Bar -->
 <div class="mobile-tabs" id="mobile-tabs">
   <div class="mobile-tab" data-panel="left" onclick="showMobileTab('left')">
-    <span class="tab-icon"><i data-lucide="settings-2"></i></span><span class="tab-label">전략</span>
+    <span class="tab-icon"><i data-lucide="search"></i></span><span class="tab-label">페르소나/키워드</span>
   </div>
   <div class="mobile-tab active" data-panel="center" onclick="showMobileTab('center')">
     <span class="tab-icon"><i data-lucide="pen-line"></i></span><span class="tab-label">편집</span>
   </div>
-  <div class="mobile-tab" data-panel="images" onclick="showMobileTab('images')">
-    <span class="tab-icon"><i data-lucide="image"></i></span><span class="tab-label">이미지</span>
+  <div class="mobile-tab" data-panel="right" onclick="showMobileTab('right')">
+    <span class="tab-icon"><i data-lucide="settings-2"></i></span><span class="tab-label">글 스타일</span>
   </div>
 </div>
 

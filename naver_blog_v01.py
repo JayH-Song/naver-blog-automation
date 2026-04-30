@@ -18,6 +18,9 @@ _REQUIRED = [
 ]
 
 def _ensure_deps():
+    import os as _os   # os는 44번 줄에서 임포트 — 함수 호출 시점(42번 줄)에 미정의이므로 지역 임포트
+    if _os.environ.get("VERCEL") == "1":
+        return   # 서버리스 환경 — pip install 불가·불필요
     import importlib
     _PKG_MAP = {               # pip 패키지명 → import 모듈명
         "python-dotenv":    "dotenv",
@@ -40,14 +43,15 @@ def _ensure_deps():
 
 _ensure_deps()
 
-import os, json, re, asyncio, logging, uuid, glob, time
+import os, html, json, re, math, asyncio, logging, uuid, glob, time, urllib.parse
+from xml.etree import ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, UploadFile
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -62,7 +66,6 @@ load_dotenv()
 BASE_DIR     = Path(__file__).parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-import os
 IS_VERCEL = os.environ.get("VERCEL") == "1"
 WRITABLE_DIR = Path("/tmp") if IS_VERCEL else BASE_DIR
 
@@ -122,16 +125,32 @@ RETRY_BASE  = 2.0    # 2 → 4 → 8초
 # ────────────────────────────────────────────
 pipeline_runs: dict[str, dict] = {}   # {run_id: {...}}
 revenue_log:   list[dict]      = []   # [{keyword, score, ts}]
+_persist_lock = asyncio.Lock()        # 동시 파일 쓰기로 인한 JSON 깨짐 방지
+_disk_revenue_cached: bool = False    # 디스크 폴백 1회 실행 후 재스캔 방지 (Cache Stampede)
 
-def _persist_pipeline_runs() -> None:
+async def _persist_pipeline_runs() -> None:
     try:
-        PIPELINE_RUNS_FILE.write_text(json.dumps(pipeline_runs, ensure_ascii=False), encoding="utf-8")
+        async with _persist_lock:
+            # 메모리 관리: 100개 초과 시 삽입 순서 기준 오래된 항목부터 제거
+            while len(pipeline_runs) > 100:
+                del pipeline_runs[next(iter(pipeline_runs))]
+            snapshot = json.dumps(pipeline_runs, ensure_ascii=False)
+            await asyncio.to_thread(
+                lambda: PIPELINE_RUNS_FILE.write_text(snapshot, encoding="utf-8")
+            )
     except Exception:
         pass
 
-def _persist_revenue_log() -> None:
+async def _persist_revenue_log() -> None:
     try:
-        REVENUE_LOG_FILE.write_text(json.dumps(revenue_log, ensure_ascii=False), encoding="utf-8")
+        async with _persist_lock:
+            # 메모리 관리: 1000개 초과 시 오래된 항목 제거
+            if len(revenue_log) > 1000:
+                del revenue_log[: len(revenue_log) - 1000]
+            snapshot = json.dumps(revenue_log, ensure_ascii=False)
+            await asyncio.to_thread(
+                lambda: REVENUE_LOG_FILE.write_text(snapshot, encoding="utf-8")
+            )
     except Exception:
         pass
 
@@ -152,7 +171,7 @@ class ConnectionManager:
 
     async def broadcast(self, msg: dict):
         dead = []
-        for ws in self.active:
+        for ws in list(self.active):   # 순회 중 변이 방어 — 얕은 복사본으로 반복
             try:
                 await ws.send_json(msg)
             except Exception:
@@ -187,15 +206,14 @@ class Persona(BaseModel):
 class WriteConfig(BaseModel):
     style: str = ""       # 정보형|경험담|꿀팁|리뷰|Q&A형|비교분석|제품비교분석형 (빈 값 = StrategyManager 자동)
     tone:  str = ""       # 따뜻하고친근한|전문적이고신뢰감있는|감성적이고공감하는|유쾌하고재미있는
-    golden_time: str = "auto"  # auto|morning|lunch|night|custom
-    cta_enabled: bool = True
+    golden_time: str = "auto"  # auto|morning|lunch|night  (auto = 현재 시각 기반 자동)
 
 class GenerateRequest(BaseModel):
     persona: Persona
     keyword: str
+    user_context: Optional[str] = ""   # 키워드 관련 개인 경험/관심사 (선택)
     config: WriteConfig
     post_history: Optional[List[dict]] = []   # [{title, url}]
-    revenue_link: Optional[str] = ""
 
 class ImageGenRequest(BaseModel):
     keyword: str
@@ -223,12 +241,10 @@ class RevenueLogEntry(BaseModel):
 _excluded_cache: tuple[set[str], float] = (set(), 0.0)
 _EXCLUDED_TTL = 300.0  # 5분 캐시 (매 요청 디스크 I/O 방지)
 
-def get_excluded_keywords() -> set[str]:
-    global _excluded_cache
-    if time.monotonic() - _excluded_cache[1] < _EXCLUDED_TTL and _excluded_cache[0]:
-        return _excluded_cache[0]
+def _scan_excluded_sync() -> set[str]:
+    """glob + stat + read_text 전체를 스레드 풀에서 실행 (stat() 폭풍 방지)"""
     cutoff = datetime.now() - timedelta(days=14)
-    excluded = set()
+    excluded: set[str] = set()
     for fp in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:50]:
         try:
             data = json.loads(fp.read_text(encoding="utf-8"))
@@ -241,26 +257,44 @@ def get_excluded_keywords() -> set[str]:
                         excluded.add(kw.lower())
         except Exception:
             pass
+    return excluded
+
+async def get_excluded_keywords() -> set[str]:
+    global _excluded_cache
+    if time.monotonic() - _excluded_cache[1] < _EXCLUDED_TTL and _excluded_cache[0]:
+        return _excluded_cache[0]
+    excluded = await asyncio.to_thread(_scan_excluded_sync)
     _excluded_cache = (excluded, time.monotonic())
     return excluded
 
 # ────────────────────────────────────────────
 # Revenue Score 계산
 # ────────────────────────────────────────────
-def calc_revenue_score(keyword: str, base_score: float = 50.0) -> tuple[float, str]:
+def _scan_disk_for_revenue() -> list[str]:
+    """고점수 키워드를 디스크에서 읽어 반환 (스레드 풀 전용 동기 헬퍼)"""
+    result: list[str] = []
+    for fp in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:50]:
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if data.get("revenue_score", 0) > 70:
+                result.append(data.get("keyword", "").lower())
+        except Exception:
+            pass
+    return result
+
+async def calc_revenue_score(keyword: str, base_score: float = 50.0) -> tuple[float, str]:
     """revenue_log 기반 가중치 계산. (score, match_type)"""
+    global _disk_revenue_cached
     kw_lower = keyword.lower()
     high_value_keywords = [e["keyword"].lower() for e in revenue_log if e.get("score", 0) > 70]
 
-    # 폴백: backups 스캔
-    if not high_value_keywords:
-        for fp in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:50]:
-            try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-                if data.get("revenue_score", 0) > 70:
-                    high_value_keywords.append(data.get("keyword", "").lower())
-            except Exception:
-                pass
+    # 폴백: 프로세스 수명 내 단 1회만 디스크 스캔 후 revenue_log에 적재 (Cache Stampede 방지)
+    if not high_value_keywords and not _disk_revenue_cached:
+        scanned_kws = await asyncio.to_thread(_scan_disk_for_revenue)
+        for kw in scanned_kws:
+            revenue_log.append({"keyword": kw, "event": "fallback", "score": 80, "ts": datetime.now().isoformat()})
+        _disk_revenue_cached = True
+        high_value_keywords = [e["keyword"].lower() for e in revenue_log if e.get("score", 0) > 70]
 
     for hvk in high_value_keywords:
         if kw_lower == hvk:
@@ -276,7 +310,7 @@ def calc_revenue_score(keyword: str, base_score: float = 50.0) -> tuple[float, s
 async def fetch_naver_searchads(seed_keyword: str) -> list[dict]:
     """시드키워드 → 연관키워드 + 모바일 검색량 Top 7"""
     import hmac, hashlib, base64
-    excluded = get_excluded_keywords()
+    excluded = await get_excluded_keywords()
 
     if not all([NAVER_ADS_API_KEY, NAVER_ADS_SECRET, NAVER_ADS_CUSTOMER]):
         raise HTTPException(503, "NAVER_ADS API 키 미설정 — .env에 NAVER_ADS_API_KEY / NAVER_ADS_SECRET / NAVER_ADS_CUSTOMER_ID 를 추가하세요")
@@ -327,7 +361,7 @@ async def fetch_naver_searchads(seed_keyword: str) -> list[dict]:
             continue
         mobile_cnt = safe_mobile_cnt(item)
         base_score = min(100, int(mobile_cnt / 1000))
-        score, match = calc_revenue_score(kw, base_score)
+        score, match = await calc_revenue_score(kw, base_score)
         results.append({
             "keyword":       kw,
             "mobile_count":  mobile_cnt,
@@ -343,11 +377,94 @@ async def fetch_naver_searchads(seed_keyword: str) -> list[dict]:
 # ────────────────────────────────────────────
 # Naver News Search API — RAG 실시간 팩트 컨텍스트
 # ────────────────────────────────────────────
-async def fetch_naver_news(keyword: str, display: int = 3) -> str:
+def _strip_tags(s: str) -> str:
+    """HTML 태그 및 주요 HTML 엔티티 제거"""
+    s = re.sub(r"<[^>]+>", "", s or "")
+    for ent, ch in [("&lt;","<"),("&gt;",">"),("&amp;","&"),("&quot;",'"'),("&#39;","'"),("&nbsp;"," ")]:
+        s = s.replace(ent, ch)
+    return s.strip()
+
+
+# ── 국민의힘 소속 정치인 뉴스 필터 ──────────────────────────────────────
+# 당명 또는 소속 주요 정치인 이름이 제목·설명에 포함된 뉴스를 제외한다.
+_PPP_FILTER: set[str] = {
+    # 정당명
+    "국민의힘", "국민의당",
+    # 전·현직 주요 인물 (가나다 순)
+    "강민국", "권성동", "권영세", "권영진",
+    "김건희", "김기현", "김문수", "김성태", "김형동",
+    "나경원",
+    "박대출", "박수영", "박정훈",
+    "배현진",
+    "신원식",
+    "안철수",
+    "오세훈",
+    "원희룡",
+    "윤상현", "윤석열", "윤석렬",   # 표기 오류 변형 포함
+    "이양수", "이철규",
+    "장동혁", "정점식", "정희용", "조수진", "조해진", "주호영",
+    "태영호",
+    "한동훈", "홍준표",
+}
+
+def _is_ppp_news(title: str, desc: str = "") -> bool:
+    """제목 또는 설명에 국민의힘·소속 정치인 이름이 포함되면 True 반환."""
+    combined = f"{title} {desc}"
+    return any(kw in combined for kw in _PPP_FILTER)
+
+
+async def _fetch_google_news_rss(keyword: str, display: int = 3) -> str:
     """
-    네이버 뉴스 검색 API로 최신 뉴스 3건을 가져와
-    시스템 프롬프트용 컨텍스트 문자열로 반환한다.
-    실패 시 빈 문자열 반환 (Graceful Degradation).
+    Google News RSS로 키워드 관련 최신 한국어 뉴스를 가져온다.
+    API 키 불필요 — 완전 무료.
+    URL: https://news.google.com/rss/search?q=...&hl=ko&gl=KR&ceid=KR:ko
+    """
+    encoded = urllib.parse.quote(keyword)
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        r = await http_client.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; HaruStudio/2.0)"},
+            timeout=10,
+            follow_redirects=True,
+        )
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        if not items:
+            return ""
+
+        lines = []
+        idx = 1
+        for item in items:
+            if idx > display:
+                break
+            raw_title = _strip_tags(item.findtext("title", ""))
+            raw_desc  = _strip_tags(item.findtext("description", ""))
+            # 국민의힘 소속 정치인 뉴스 제외
+            if _is_ppp_news(raw_title, raw_desc):
+                continue
+            # Google RSS 제목 형식: "기사 제목 - 언론사" — 언론사 분리
+            if " - " in raw_title:
+                title, source = raw_title.rsplit(" - ", 1)
+                src_label = f" [{source}]"
+            else:
+                title, src_label = raw_title, ""
+            pub_date = item.findtext("pubDate", "")[:16]
+            lines.append(f"[뉴스{idx}]{src_label} {title} ({pub_date})\n   → {raw_desc[:140]}")
+            idx += 1
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning(f"[NEWS_RAG] Google News RSS 오류: {e}")
+        return ""
+
+
+async def _fetch_naver_news_api(keyword: str, display: int = 3) -> str:
+    """
+    Naver 검색 API로 뉴스를 가져온다 (보조 수단).
+    NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 환경변수가 있을 때만 동작.
     """
     if not all([NAVER_CLIENT_ID, NAVER_CLIENT_SECRET]):
         return ""
@@ -358,37 +475,142 @@ async def fetch_naver_news(keyword: str, display: int = 3) -> str:
                 "X-Naver-Client-Id":     NAVER_CLIENT_ID,
                 "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
             },
-            params={"query": keyword, "display": display, "sort": "sim"},
+            params={"query": keyword, "display": display, "sort": "date"},
             timeout=8,
         )
+        if r.status_code in (401, 403):
+            try: msg = r.json().get("errorMessage", "")
+            except: msg = ""
+            logger.warning(f"[NEWS_RAG] Naver API 인증 실패 ({r.status_code}) — 앱에 검색 API 권한 추가 필요. {msg}")
+            return ""
         r.raise_for_status()
         items = r.json().get("items", [])
         if not items:
             return ""
-
-        def _strip_html(text: str) -> str:
-            return re.sub(r"<[^>]+>", "", text).strip()
-
         lines = []
-        for i, item in enumerate(items[:display], 1):
-            title = _strip_html(item.get("title", ""))
-            desc  = _strip_html(item.get("description", ""))
-            date  = item.get("pubDate", "")[:16]          # "Sat, 26 Apr 2026"
-            lines.append(f"[뉴스{i}] {title} ({date})\n   → {desc}")
-
+        idx = 1
+        for item in items:
+            if idx > display:
+                break
+            title = _strip_tags(item.get("title", ""))
+            desc  = _strip_tags(item.get("description", ""))
+            # 국민의힘 소속 정치인 뉴스 제외
+            if _is_ppp_news(title, desc):
+                continue
+            date = item.get("pubDate", "")[:16]
+            lines.append(f"[뉴스{idx}] {title} ({date})\n   → {desc[:140]}")
+            idx += 1
         return "\n".join(lines)
-
     except Exception as e:
-        logger.warning(f"Naver News API 오류 (RAG 스킵): {e}")
+        logger.warning(f"[NEWS_RAG] Naver News API 오류: {e}")
         return ""
 
 
+async def fetch_news_context(keyword: str, display: int = 3) -> str:
+    """
+    뉴스 RAG 컨텍스트 수집.
+      1순위: Google News RSS (API 키 불필요, 무료)
+      2순위: Naver 검색 API (NAVER_CLIENT_ID 설정 시 보조)
+    """
+    result = await _fetch_google_news_rss(keyword, display)
+    if result:
+        return result
+    return await _fetch_naver_news_api(keyword, display)
+
+
 # ────────────────────────────────────────────
-# Naver DataLab API — 최근 3일 트렌드 Top 7
+# Naver DataLab API — 블루오션 키워드 발굴
+#
+# ※ 기술적 제약: DataLab 공개 API는 지정한 키워드의 트렌드 비율만 반환하며,
+#   "전체 검색어 TOP N 순위 목록"을 제공하는 엔드포인트는 존재하지 않음.
+#   → 사전 정의 후보 풀(50개) 내 상대 순위로 블루오션 개념을 근사 구현.
 # ────────────────────────────────────────────
+
+# 후보 풀: 정보성 블로그에 적합한 50개 롱테일 키워드
+_CANDIDATE_KEYWORDS: list[str] = [
+    # 건강/영양
+    "비타민D 효능", "마그네슘 부족 증상", "오메가3 복용법", "유산균 추천", "콜라겐 효과",
+    "철분 결핍 증상", "아연 음식", "엽산 임산부", "칼슘 흡수 방법", "비타민B12 부족",
+    # 다이어트/체중
+    "간헐적 단식 방법", "저탄고지 식단", "복부지방 빼기", "체지방률 낮추기", "식욕 억제 방법",
+    "단백질 음식 추천", "저칼로리 식사", "야식 끊기", "기초대사량 높이기", "살빠지는 음식",
+    # 피부/미용
+    "피부장벽 강화", "아토피 관리법", "여드름 원인", "색소침착 없애기", "보습크림 추천",
+    "레티놀 사용법", "비타민C 세럼 추천", "선크림 성분 비교", "다크서클 없애기", "모공 줄이기",
+    # 수면/정신건강
+    "불면증 해결법", "수면 질 높이기", "수면무호흡 증상", "낮잠 효과", "멜라토닌 부작용",
+    "스트레스 해소법", "번아웃 극복", "명상 방법 초보", "우울감 극복", "불안 해소 방법",
+    # 운동/재활
+    "허리 통증 운동", "무릎 관절염 관리", "목 디스크 증상", "어깨 통증 스트레칭", "발목 염좌 치료",
+    "홈트레이닝 루틴", "유산소 운동 효과", "근력 운동 초보", "폼롤러 사용법", "스쿼트 올바른 자세",
+    # 식품/생활습관
+    "당뇨 식단 관리", "고혈압 음식", "콜레스테롤 낮추기", "장 건강 음식", "두뇌 좋아지는 음식",
+    "해독주스 효능", "발효식품 종류", "항산화 음식 추천", "면역력 높이는 음식", "피로회복 음식",
+]
+
+# 브랜드·고유명사 필터 정규식
+_BRAND_RE = re.compile(
+    r'(?:삼성|LG|애플|나이키|아디다스|뉴발란스|구찌|샤넬|루이비통|프라다|버버리|에르메스|'
+    r'롤렉스|오메가시계|아이폰|갤럭시|맥북|아이패드|다이슨|발뮤다|필립스|파나소닉|소니|'
+    r'스타벅스|맥도날드|버거킹|코카콜라|펩시|쿠팡|배달의민족|카카오|현대차|기아차|'
+    r'벤츠|BMW|아우디|볼보|테슬라|nike|adidas|apple|samsung|google|amazon)',
+    re.IGNORECASE,
+)
+
+
+def _is_brand_keyword(kw: str) -> bool:
+    """브랜드명·고유명사 포함 키워드 판별"""
+    return bool(_BRAND_RE.search(kw))
+
+
+def _calc_trend_stats(data: list[dict]) -> dict:
+    """
+    DataLab API 날짜별 ratio 데이터 → 트렌드 통계 산출.
+    - recent_avg : 최근 7일 평균 ratio
+    - prev_avg   : 그 이전 7일 평균 ratio
+    - growth_rate: 전주 대비 증감률 (%)
+    - is_rising  : 전주 대비 +10% 이상 OR 최근 3일 연속 상승
+    """
+    sorted_data = sorted(data, key=lambda x: x.get("period", ""))
+    ratios = [d.get("ratio", 0) for d in sorted_data]
+    if not ratios:
+        return {"peak": 0, "recent_avg": 0.0, "prev_avg": 0.0, "growth_rate": 0.0, "is_rising": False}
+
+    peak = max(ratios)
+    if len(ratios) < 8:
+        return {"peak": peak, "recent_avg": round(sum(ratios)/len(ratios), 2),
+                "prev_avg": 0.0, "growth_rate": 0.0, "is_rising": False}
+
+    recent   = ratios[-7:]
+    prev     = ratios[-14:-7]
+    recent_avg = sum(recent) / len(recent)
+    prev_avg   = sum(prev) / len(prev) if prev else 0.0
+    growth_rate = ((recent_avg - prev_avg) / prev_avg * 100) if prev_avg > 0 else 0.0
+
+    is_rising_weekly = growth_rate >= 10.0
+    is_rising_3d     = len(ratios) >= 3 and ratios[-1] > ratios[-2] > ratios[-3]
+    return {
+        "peak":        peak,
+        "recent_avg":  round(recent_avg, 2),
+        "prev_avg":    round(prev_avg, 2),
+        "growth_rate": round(growth_rate, 1),
+        "is_rising":   is_rising_weekly or is_rising_3d,
+    }
+
+
 async def fetch_naver_datalab() -> list[dict]:
-    """최근 30일 트렌드 집계 → Top 5"""
-    excluded   = get_excluded_keywords()
+    """
+    블루오션 키워드 발굴 (후보 풀 50개 → Top 10 반환).
+
+    선정 순서:
+      1. 후보 풀 전체 DataLab API 조회 (5개씩 배치)
+      2. 브랜드·제외 키워드 필터링
+      3. 풀 내 peak ratio 기준 순위 부여
+      4. 블루오션 구간 추출: 상위 20% 초과 ~ 하위 20% 미만 (경쟁 회피 + 유입 가능성 확보)
+      5. 블루오션 구간 내 상승 추세 키워드 → '황금 키워드' 분류
+      6. 황금 키워드 우선, 상승률 높은 순 정렬 → Top 10
+    """
+    excluded = await get_excluded_keywords()
     end_date   = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
@@ -400,43 +622,82 @@ async def fetch_naver_datalab() -> list[dict]:
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
         "Content-Type":          "application/json",
     }
-    body = {
-        "startDate": start_date,
-        "endDate":   end_date,
-        "timeUnit":  "date",
-        "keywordGroups": [
-            {"groupName": kw, "keywords": [kw]}
-            for kw in ["건강", "영양제", "다이어트", "운동", "수면"]
-        ],
-    }
-    r = await http_client.post(
-        "https://openapi.naver.com/v1/datalab/search",
-        headers=headers, json=body, timeout=15
-    )
-    if r.status_code != 200:
-        logger.error(f"DataLab API 오류 {r.status_code}: {r.text[:300]}")
-        raise HTTPException(r.status_code, f"Naver DataLab API 오류: {r.status_code}")
 
-    results_raw = r.json().get("results", [])
-    results = []
-    for item in sorted(
-        results_raw,
-        key=lambda x: max((d.get("ratio", 0) for d in x.get("data", [])), default=0),
-        reverse=True
-    ):
-        kw = item.get("title", "")
-        if not kw or kw.lower() in excluded:
-            continue
-        ratio = max((d.get("ratio", 0) for d in item.get("data", [])), default=0)
-        score, match = calc_revenue_score(kw, ratio)
+    # 브랜드·제외 필터 선적용 후 배치 분할
+    filtered_candidates = [
+        kw for kw in _CANDIDATE_KEYWORDS
+        if kw.lower() not in excluded and not _is_brand_keyword(kw)
+    ]
+    batches = [filtered_candidates[i:i+5] for i in range(0, len(filtered_candidates), 5)]
+
+    # 배치별 DataLab API 호출 (API 제한: 요청당 keywordGroups 최대 5개)
+    raw_map: dict[str, list[dict]] = {}
+    for batch in batches:
+        body = {
+            "startDate": start_date,
+            "endDate":   end_date,
+            "timeUnit":  "date",
+            "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in batch],
+        }
+        try:
+            r = await http_client.post(
+                "https://openapi.naver.com/v1/datalab/search",
+                headers=headers, json=body, timeout=15
+            )
+            if r.status_code != 200:
+                logger.warning(f"DataLab 배치 오류 {r.status_code}: {r.text[:200]}")
+                continue
+            for item in r.json().get("results", []):
+                raw_map[item.get("title", "")] = item.get("data", [])
+        except Exception as e:
+            logger.warning(f"DataLab 배치 요청 실패: {e}")
+
+    if not raw_map:
+        raise HTTPException(502, "DataLab API 응답 없음 — 모든 배치 요청 실패")
+
+    # 풀 전체 트렌드 통계 계산
+    pool: list[dict] = []
+    for kw, data in raw_map.items():
+        stats = _calc_trend_stats(data)
+        pool.append({"keyword": kw, **stats})
+
+    # peak ratio 기준 내림차순 정렬 → 풀 내 순위 부여
+    pool.sort(key=lambda x: x["peak"], reverse=True)
+    pool_size = len(pool)
+    for rank, item in enumerate(pool, start=1):
+        item["pool_rank"] = rank
+
+    # 블루오션 구간: 상위 20% 초과(경쟁 과열 제외), 하위 20% 미만(무관심 제외)
+    bo_start = math.ceil(pool_size * 0.20) + 1
+    bo_end   = math.ceil(pool_size * 0.80)
+    blue_ocean = [x for x in pool if bo_start <= x["pool_rank"] <= bo_end]
+
+    # 황금 키워드(상승 추세) 우선, 상승률 높은 순 → 나머지는 최근 평균 높은 순
+    golden     = sorted([x for x in blue_ocean if x["is_rising"]], key=lambda x: x["growth_rate"], reverse=True)
+    non_golden = sorted([x for x in blue_ocean if not x["is_rising"]], key=lambda x: x["recent_avg"], reverse=True)
+
+    results: list[dict] = []
+    for item in golden + non_golden:
+        kw = item["keyword"]
+        score, match = await calc_revenue_score(kw, item["recent_avg"])
         results.append({
-            "keyword": kw, "trend_ratio": ratio,
+            "keyword":       kw,
+            "trend_ratio":   item["peak"],
             "revenue_score": round(score, 1),
-            "match_type": match, "excluded": False,
-            "source": "api",
+            "match_type":    match,
+            "excluded":      False,
+            "source":        "api",
+            # 블루오션 리포트 필드
+            "pool_rank":     item["pool_rank"],
+            "pool_size":     pool_size,
+            "growth_rate":   item["growth_rate"],
+            "recent_avg":    item["recent_avg"],
+            "is_rising":     item["is_rising"],
+            "label":         "황금 키워드" if item["is_rising"] else "블루오션",
         })
-        if len(results) >= 5:
+        if len(results) >= 10:
             break
+
     return results
 
 # ════════════════════════════════════════════
@@ -543,7 +804,9 @@ def build_system_prompt(
     config: WriteConfig,
     revenue_match: str,
     keyword: str,
-    news_context: str = "",   # RAG: 최신 뉴스 요약 (없으면 빈 문자열)
+    news_context: str = "",    # RAG: 최신 뉴스 요약 (없으면 빈 문자열)
+    user_context: str = "",    # 사용자 개인 경험/관심사 (없으면 빈 문자열)
+    post_history: list | None = None,  # 내부 링크 목록 [{title, url}]
 ) -> str:
     # ── BUG FIX 3: effective_style/tone 항상 기본값 보장 ──
     try:
@@ -586,6 +849,22 @@ def build_system_prompt(
     else:
         rag_block = ""
 
+    # ── 사용자 개인 관심사 블록 ──
+    if user_context and user_context.strip():
+        personal_block = f"""
+## 작성자 개인 관심사 / 경험 (★ 최우선 반영)
+"{user_context.strip()}"
+
+[활용 지침]
+1. 위 개인 맥락을 글의 도입부(Hook) 출발점으로 삼으세요 — 독자가 비슷한 상황이라 가정하고 공감을 이끌어내세요.
+2. 소제목과 예시 각도도 이 관심사 기준으로 재구성하세요.
+3. 추상적 정보 나열 대신, 이 맥락에서 실질적으로 가장 유용한 내용을 우선 배치하세요.
+4. 결론부에서 이 관심사가 해결되었음을 자연스럽게 마무리하세요.
+
+"""
+    else:
+        personal_block = ""
+
     time_block = f"""[시스템 환경 정보]
 - 현재 시점: {current_year}년 {current_month}월
 - 당신이 작성하는 모든 글의 시제는 반드시 이 시점을 '현재'로 기준해야 합니다.
@@ -608,7 +887,9 @@ def build_system_prompt(
 2. **주석 및 출처 표기**: 인용 문장 끝에 <sup>[1]</sup> 형식의 HTML 주석을 달고, 본문 최하단(FAQ 이전)에 '📚 참고 자료' 섹션을 만들어 아래 형식으로 출처를 명시하세요.
    - 형식: [1] 저자명, "논문/도서 제목", 발행기관(연도)
 3. **수치 기반 표현**: "많이 좋아집니다" 같은 모호한 표현 대신 "A 학술지 연구 결과에 따르면 약 24%의 개선율을 보였습니다<sup>[1]</sup>"처럼 구체적 수치를 동반하세요.
-4. **허구 인용 방지**: 실제 존재하는 기관·연구 성격을 기반으로 작성하되, 구체적 논문명을 확신할 수 없으면 "관련 분야 학계의 일반적인 연구 동향에 따르면..."과 같이 권위 있는 표현으로 대체하세요.
+4. **허구 인용 절대 금지**: 존재하지 않는 논문명·저자명·연구 제목을 지어내는 것은 엄격히 금지됩니다. 구체적인 논문·도서명을 확신할 수 없으면 반드시 아래처럼 기관·분야 수준으로만 표현하세요.
+   - ✅ 허용: "국내 영양학 분야 연구에 따르면", "대한의학회 가이드라인에서는", "미국 국립보건원(NIH) 권고에 따르면"
+   - ❌ 금지: 구체적인 논문명, 저자명, 권호, 페이지 등 확인되지 않은 세부 정보 일체
 
 출력 구조 예시:
 ... (본문) ... 따라서 3개월 이상 섭취 시 혈중 농도가 안정화된다는 연구 결과가 있습니다<sup>[1]</sup>.
@@ -620,7 +901,58 @@ def build_system_prompt(
     else:
         citation_block = ""
 
-    return f"""{rag_block}{time_block}{citation_block}당신은 아래 내면적 배경을 가진 네이버 블로거입니다.
+    # ── 내부 링크 HTML 블록 생성 ──
+    history_str_html = ""
+    if post_history:
+        for p in post_history:
+            history_str_html += f'<p style="margin:8px 0;"><a href="{p.get("url", "")}" style="color:#0066cc; text-decoration:underline; font-size:14px;">☞ {p.get("title", "")}</a></p>\n'
+
+    # ── 상위노출 시각적/구조적 포맷팅 규칙 ──
+    visual_format_block = f"""
+★ 모바일 최적화 및 상위노출 시각적/구조적 포맷팅 규칙 (반드시 엄수)
+실제 네이버 검색 상위 노출 블로그들의 레이아웃과 가독성 최적화 기법을 적용하세요.
+
+### 1. 극단적인 여백과 짧은 단락 (모바일 가독성 극대화)
+한 문단은 절대 2문장을 초과하지 마세요. 무조건 1~2문장 작성 후 강제 줄바꿈(\\n\\n)을 넣어 모바일 화면에서 시원한 여백을 만드세요.
+
+### 2. 네이버 그린(#03C75A) 및 형광펜 하이라이트 강조
+각 단락에서 핵심 해결책이나 공감 문장에는 녹색 볼드체를 사용하세요:
+<b style="color:#03C75A">텍스트</b>
+독자의 시선이 반드시 멈춰야 하는 글 전체의 가장 중요한 1~2줄에는 연한 녹색 배경(형광펜 효과)을 적용하세요:
+<mark style="background:#e6faf0;padding:2px 6px;border-radius:3px;font-weight:700">핵심 텍스트</mark>
+
+### 3. 정보 요약 박스 (Info Box) 적극 활용
+글의 서론(Hook) 끝이나 핵심 개념을 정리할 때는 텍스트만 나열하지 말고 아래의 깔끔한 라운드 박스를 삽입하세요.
+<div style="background:#f8fffe;border:1px solid #b2dfdb;border-radius:12px;padding:18px 22px;margin:20px 0;font-family:sans-serif">
+<p style="font-weight:700;font-size:15px;margin:0 0 10px;color:#017a38">💡 핵심 요약</p>
+<ul style="margin:0;padding-left:18px;color:#1a2a1e;font-size:14px;line-height:2">
+<li>요약 항목 1</li>
+<li>요약 항목 2</li>
+<li>요약 항목 3</li>
+</ul>
+</div>
+
+### 4. 감성적 인용구 (Quote Block) 활용 (글 전체 1~2회)
+독자의 속마음("나만 이런 고민을 하는 걸까?"), 대화, 또는 글의 감성적 메시지를 전달할 때는 아래 인용구를 사용해 시선을 집중시키세요.
+<blockquote style="border-left:4px solid #03C75A;background:#f0faf4;margin:20px 0;padding:14px 20px;border-radius:0 8px 8px 0;font-size:15px;color:#1a2a1e;font-style:italic;line-height:1.8">
+"감성적인 공감 문장을 여기에"
+</blockquote>
+
+### 5. 적절한 이모지 및 구분선 삽입
+대주제가 넘어갈 때 호흡을 끊어주기 위해 아래 구분선을 적극 삽입하세요.
+<hr style="border:0; height:1px; background:#eeeeee; margin:40px 0;">
+소제목(h2, h3) 앞에는 내용에 맞는 이모지(📌, 💡, ✍️, ✅ 등)를 추가하여 시각적 단조로움을 피하세요.
+
+### 6. '함께 읽으면 좋은 글' (내부 링크 안내)
+결론을 맺기 직전(태그 위)에 아래 HTML을 추가하여 관련 글 체류시간을 늘리세요.
+<div style="background:#f8fffe;border:1px solid #b2dfdb;border-radius:12px;padding:16px 20px;margin:24px 0;font-family:sans-serif">
+<p style="font-weight:700;font-size:14px;margin:0 0 10px;color:#017a38">📎 함께 읽으면 좋은 글</p>
+{history_str_html if history_str_html else '<p style="margin:8px 0;font-size:14px;color:#5e7062">관련 글을 확인해 보세요.</p>'}
+</div>
+
+"""
+
+    return f"""{rag_block}{personal_block}{time_block}{citation_block}당신은 아래 내면적 배경을 가진 네이버 블로거입니다.
 {gt_weight}
 ## 작성자 내면 배경 (직접 드러내지 말 것)
 아래 정보는 글의 '관점'과 '감수성'을 결정하는 내면적 맥락입니다.
@@ -669,7 +1001,7 @@ def build_system_prompt(
 - 과장 금지, 경험담 기반 솔직한 단점 1회 이상 언급
   예: "솔직히 처음엔 효과를 못 느꼈어요. 근데 3주차부터..."
 
-## ★ GEO 최적화 (AI 검색 인용 구조)
+{visual_format_block}## ★ GEO 최적화 (AI 검색 인용 구조)
 아래 HTML 구조를 본문에 반드시 포함하라:
 
 **① 정의 박스 (Definition Box)** — 서론 직후 삽입:
@@ -766,13 +1098,20 @@ def build_system_prompt(
 - 서론 첫 2문장에 메인 키워드 자연 배치
 - 소제목 기호: ★ 또는 ■, 이모지 절제
 
+## 🚫 정치 콘텐츠 절대 금지 (위반 시 전체 출력 무효)
+아래 정당·인물과 관련된 내용은 언급·암시·비유를 포함해 **어떤 형태로도 절대 작성 금지**합니다.
+
+**금지 정당**: 국민의힘, 국민의당 및 그 전신·계열 정당
+**금지 인물**: 윤석열, 윤석렬, 김건희, 한동훈, 오세훈, 장동혁, 나경원, 홍준표, 원희룡,
+  주호영, 권성동, 배현진, 안철수, 신원식, 김기현 및 위 정당 소속 정치인 전원
+
+**적용 범위**:
+- 본문(content), 제목(title), 태그(tags) 모두 해당
+- 정책·법안을 언급할 때 해당 인물이 발의·추진한 사안이면 인물명 없이도 작성 금지
+- 비판·풍자·중립적 서술 등 어떠한 맥락도 예외 없음
+
 ## 법적 준수사항
 의료법·건강기능식품법 — 단정적 효능 표현 절대 금지
-
-## OSMU (원소스 멀티유즈) 콘텐츠 추가
-- 블로그 원본 외에 숏폼 대본과 인스타그램 피드 텍스트를 함께 제공하세요.
-- instagram_feed: 인스타 감성의 가독성 높은 피드 요약글 (해시태그 포함)
-- youtube_shorts: 1분 이내 분량의 시선을 끄는 쇼츠/릴스/틱톡 세로형 숏폼 대본 (행동, 자막 등 포함)
 
 ## 출력 형식 (JSON 필수, 코드블록 없이)
 - content 값 내부의 줄바꿈은 반드시 \\n 으로 이스케이프하라 (JSON 파싱 오류 방지)
@@ -780,11 +1119,7 @@ def build_system_prompt(
 {{
   "title": "SEO 최적화된 제목",
   "content": "<p>HTML 본문 — 줄바꿈은 \\n, 따옴표는 \\"로 이스케이프</p>",
-  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
-  "osmu": {{
-    "instagram_feed": "인스타그램 피드 텍스트...",
-    "youtube_shorts": "쇼츠 대본 내용..."
-  }}
+  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
 }}"""
 
 def _sanitize_content(content: str) -> str:
@@ -812,68 +1147,98 @@ def _sanitize_content(content: str) -> str:
     return content.strip()
 
 
+def _content_field_span(text: str):
+    """
+    content 필드 값의 (start, end) 인덱스를 반환한다.
+    따옴표 감지가 아닌 '다음 필드 이름' 경계 탐지 방식을 사용해
+    HTML 속성의 이스케이프되지 않은 " 에도 안전하다.
+    """
+    start_m = re.search(r'"content"\s*:\s*"', text)
+    if not start_m:
+        return None, None
+    start = start_m.end()          # 여는 " 다음 위치
+
+    # content 다음에 오는 알려진 필드명 또는 JSON 닫힘 }
+    end_m = re.search(
+        r'",\s*"(?:tags|shopping|revenue_score|run_id)"\s*:|"\s*\}',
+        text[start:],
+    )
+    if not end_m:
+        return None, None
+    return start, start + end_m.start()   # end = 닫는 " 위치
+
+
+def _escape_content_field(text: str) -> str:
+    """
+    content 필드 내부의 리터럴 개행과 이스케이프되지 않은 " 를 수정한다.
+    수정 후 json.loads 가 성공할 수 있는 문자열을 반환한다.
+    """
+    start, end = _content_field_span(text)
+    if start is None:
+        return text
+    section = text[start:end]
+    # 리터럴 개행 → JSON 이스케이프
+    section = section.replace('\r\n', '\\n').replace('\r', '').replace('\n', '\\n')
+    # 이스케이프되지 않은 " → \" (이미 \ 가 앞에 있으면 건드리지 않음)
+    section = re.sub(r'(?<!\\)"', r'\\"', section)
+    return text[:start] + section + text[end:]
+
+
+def _extract_content_by_boundary(text: str) -> str:
+    """경계 탐지로 content 값을 직접 추출한다 (JSON 문법 파싱 없이)."""
+    start, end = _content_field_span(text)
+    if start is None or end is None:
+        return ""
+    raw = text[start:end]
+    return raw.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+
+
 def _robust_parse_article(raw: str) -> dict:
     """
     Claude 응답에서 JSON을 추출하는 다단계 파서.
-    HTML content 안의 개행·따옴표로 인한 JSONDecodeError를 방어한다.
 
-    1단계: 코드블록 제거 후 표준 json.loads
-    2단계: content 값의 개행을 공백으로 치환 후 재파싱
-    3단계: 정규식으로 title / content / tags 개별 추출
+    1단계: 표준 json.loads
+    2단계: content 필드 경계 탐지 → 개행·따옴표 이스케이프 후 재파싱
+    3단계: 경계 탐지로 content 직접 추출 (JSON 파싱 포기)
+    4단계: 완전 폴백
     """
-    # ── 공통 전처리 ──
     text = re.sub(r"```json\s*|\s*```", "", raw).strip()
 
     # 1단계: 표준 파싱
     try:
         result = json.loads(text)
         result["content"] = _sanitize_content(result.get("content", ""))
+        logger.debug("[parse] Stage 1 성공")
         return result
     except json.JSONDecodeError:
         pass
 
-    # 2단계: content 필드의 리터럴 개행을 \n 으로 치환 후 재파싱
-    # (?:[^"\\]|\\.)* 패턴으로 \" 이스케이프 문자를 포함한 값을 올바르게 추출
+    # 2단계: content 필드 내부 개행·따옴표 이스케이프 후 재파싱
     try:
-        fixed = re.sub(
-            r'("content"\s*:\s*")((?:[^"\\]|\\.)*?)("(?:\s*,|\s*\}))',
-            lambda m: m.group(1) + m.group(2).replace('\n', '\\n').replace('\r', '') + m.group(3),
-            text,
-            flags=re.DOTALL,
-        )
+        fixed = _escape_content_field(text)
         result = json.loads(fixed)
         result["content"] = _sanitize_content(result.get("content", ""))
+        logger.debug("[parse] Stage 2 성공 (escape_content_field)")
         return result
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, Exception):
         pass
 
-    # 3단계: 정규식으로 개별 필드 추출 (최후 수단)
-    # (?:[^"\\]|\\.)* 패턴: " 와 \ 를 제외한 모든 문자, 또는 \ 뒤 임의 문자(이스케이프)
-    title_m   = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
-    content_m = re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
-    tags_m    = re.search(r'"tags"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+    # 3단계: 경계 탐지로 개별 필드 직접 추출
+    content = _extract_content_by_boundary(text)
 
+    title_m = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
     title   = title_m.group(1) if title_m else ""
-    content = content_m.group(1).replace('\\n', '\n').replace('\\"', '"') if content_m else ""
-    tags    = re.findall(r'"([^"]+)"', tags_m.group(1)) if tags_m else []
 
-    osmu = {}
-    osmu_m = re.search(r'"osmu"\s*:\s*(\{.*?\})', text, re.DOTALL)
-    if osmu_m:
-        try: osmu = json.loads(osmu_m.group(1).replace('\n', '\\n'))
-        except: pass
+    tags_m = re.search(r'"tags"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+    tags   = re.findall(r'"([^"]+)"', tags_m.group(1)) if tags_m else []
 
     if content:
-        return {"title": title, "content": _sanitize_content(content), "tags": tags, "osmu": osmu}
+        logger.debug("[parse] Stage 3 성공 (boundary extraction)")
+        return {"title": title, "content": _sanitize_content(content), "tags": tags}
 
-    # 4단계: 완전 폴백 — content가 끝내 추출되지 않으면 오류 메시지 반환
+    # 4단계: 완전 폴백 — 조용한 성공 위장 금지, 호출자의 except 블록으로 에러 전파
     logger.error(f"[_robust_parse_article] 모든 파싱 단계 실패. raw[:300]: {raw[:300]}")
-    return {
-        "title":   title or "",
-        "content": "<p>⚠ 원고 파싱에 실패했습니다. 다시 시도해 주세요.</p>",
-        "tags":    tags,
-        "osmu":    osmu,
-    }
+    raise ValueError(f"원고 JSON 파싱 완전 실패. 응답 일부: {raw[:100]}")
 
 
 async def generate_article(
@@ -883,11 +1248,13 @@ async def generate_article(
     config: WriteConfig,
     post_history: list,
     revenue_match: str,
-    revenue_link: str = "",
-    news_context: str = "",   # RAG: api_generate에서 주입
+    news_context: str = "",    # RAG: api_generate에서 주입
+    user_context: str = "",    # 사용자 개인 관심사/경험
 ) -> dict:
     """Claude API를 통한 원고 생성 (Retry 3회 + 강건한 JSON 파서)"""
     await log_step(run_id, "WRITE", f"글 빌드 시작 — {keyword}")
+    if user_context:
+        await log_step(run_id, "WRITE", f"개인 관심사 반영 — {user_context[:50]}{'...' if len(user_context) > 50 else ''}", "done")
 
     history_str = ""
     if post_history:
@@ -895,12 +1262,8 @@ async def generate_article(
         for p in post_history:
             history_str += f"- [{p.get('title', '')}]({p.get('url', '')})\n"
 
-    rev_str = ""
-    if revenue_link:
-        rev_str = f'\n\n수익 링크: <a href="{revenue_link}" class="revenue-link" rel="sponsored">[추천 상품 보기]</a> — 이 링크를 CTA 박스 내에 자연스럽게 삽입하세요.'
-
-    system_prompt = build_system_prompt(persona, config, revenue_match, keyword, news_context)
-    user_prompt   = f'키워드: "{keyword}"\n{history_str}{rev_str}\n\n위 키워드로 블로그 포스팅을 작성하세요. 반드시 JSON 형식으로만 응답하세요.'
+    system_prompt = build_system_prompt(persona, config, revenue_match, keyword, news_context, user_context, post_history)
+    user_prompt   = f'키워드: "{keyword}"\n{history_str}\n\n위 키워드로 블로그 포스팅을 작성하세요. 반드시 JSON 형식으로만 응답하세요.'
 
     for attempt in range(RETRY_MAX):
         try:
@@ -918,6 +1281,7 @@ async def generate_article(
                     "messages":   [{"role": "user", "content": user_prompt}],
                 },
                 timeout=120,
+                follow_redirects=False,  # POST→리디렉션→GET 전환으로 인한 404 방지
             )
             r.raise_for_status()
             raw    = r.json()["content"][0]["text"]
@@ -927,6 +1291,16 @@ async def generate_article(
             if not result.get("content"):
                 raise ValueError("파싱된 content가 비어 있습니다")
 
+            # 정치 콘텐츠 사후 검증 — 프롬프트 금지를 뚫고 생성된 경우 재시도 강제
+            _article_text = " ".join([
+                result.get("title", ""),
+                result.get("content", ""),
+                " ".join(result.get("tags", [])),
+            ])
+            _found_political = [kw for kw in _PPP_FILTER if kw in _article_text]
+            if _found_political:
+                raise ValueError(f"정치 콘텐츠 금지어 감지 — 재생성 필요: {_found_political[:5]}")
+
             await log_step(run_id, "WRITE", f"드래프트 완료 [{MODEL_CLAUDE_HAIKU}]", "done")
             return result
 
@@ -935,11 +1309,7 @@ async def generate_article(
             logger.warning(f"원고 생성 시도 {attempt+1}/{RETRY_MAX} 실패 ({wait:.1f}초 후 재시도): {e}")
             if attempt == RETRY_MAX - 1:
                 await log_step(run_id, "WRITE", f"드래프트 생성 실패: {e}", "error")
-                return {
-                    "title":   f"{keyword} 완벽 가이드",
-                    "content": f"<p>원고 생성에 실패했습니다. 다시 시도해 주세요. (오류: {str(e)[:100]})</p>",
-                    "tags":    [keyword],
-                }
+                raise RuntimeError(f"원고 생성 3회 재시도 최종 실패: {e}")
             await asyncio.sleep(wait)
 
 # ────────────────────────────────────────────
@@ -980,9 +1350,17 @@ JSON 형식으로만 응답하세요:
       "background":   "배경 묘사"
     }}
   ],
-  "alt_texts": ["이미지1 alt", "이미지2 alt", "이미지3 alt", "이미지4 alt", "이미지5 alt"]
+  "infographics": [
+    {{
+      "title":       "인포그래픽 제목 (예: 핵심 효과 3가지)",
+      "key_points":  ["핵심 포인트1", "핵심 포인트2", "핵심 포인트3"],
+      "color_scheme": "색상 테마 (예: green and white, blue gradient)",
+      "style":       "flat design infographic style"
+    }}
+  ],
+  "alt_texts": ["실사1 alt", "실사2 alt", "실사3 alt", "인포그래픽1 alt", "인포그래픽2 alt"]
 }}
-body_images는 본문 흐름에 맞게 5개 생성하세요."""
+body_images는 본문 흐름에 맞게 3개, infographics는 본문의 핵심 정보를 시각화하는 2개를 생성하세요."""
 
     for attempt in range(3):
         try:
@@ -993,7 +1371,10 @@ body_images는 본문 흐름에 맞게 5개 생성하세요."""
             )
             if r.status_code != 200:
                 raise RuntimeError(f"Gemini {r.status_code}: {r.text[:200]}")
-            raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            candidates = r.json().get("candidates", [])
+            if not candidates:
+                raise RuntimeError("Gemini 응답에 candidates 없음 (Safety 필터 또는 빈 응답)")
+            raw = candidates[0]["content"]["parts"][0]["text"]
             raw = re.sub(r"```json\s*|\s*```", "", raw).strip()
             result = json.loads(raw)
             await log_step(run_id, "IMG_KW", "비주얼 키워드 추출 완료", "done")
@@ -1006,7 +1387,7 @@ body_images는 본문 흐름에 맞게 5개 생성하세요."""
     raise RuntimeError("Gemini 이미지 키워드 추출 실패 — API 키 및 모델 상태를 확인하세요")
 
 # ────────────────────────────────────────────
-# DALL-E 4 — 썸네일 생성
+# DALL-E 3 — 썸네일 생성
 # ────────────────────────────────────────────
 async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> list[str]:
     """DALL-E로 썸네일 2개 생성 → /static/generated/ 저장"""
@@ -1039,7 +1420,7 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
                 img_r = await http_client.get(url, timeout=60)
                 fname = f"{today}_title_{keyword[:10]}_{i+1:02d}.png"
                 fpath = STATIC_DIR / fname
-                fpath.write_bytes(img_r.content)
+                await asyncio.to_thread(fpath.write_bytes, img_r.content)
                 saved.append(f"/static/generated/{fname}")
                 break
             except Exception as e:
@@ -1051,12 +1432,13 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
     return saved
 
 # ────────────────────────────────────────────
-# DALL-E 4 — 본문 실사 이미지 병렬 생성 (asyncio.gather)
+# DALL-E 3 — 본문 실사 이미지 병렬 생성 (asyncio.gather)
 # ────────────────────────────────────────────
 async def _generate_single_body_image(
-    idx: int, bi: dict, keyword: str, alt: str, today: str
+    idx: int, bi: dict, keyword: str, alt: str, today: str,
+    sem: asyncio.Semaphore,
 ) -> dict:
-    """단일 본문 이미지 생성 (Retry 3회) — 병렬 호출용"""
+    """단일 본문 이미지 생성 (Retry 3회, Semaphore 동시 제한) — 병렬 호출용"""
     prompt = (
         f"A high-end commercial photo of {bi.get('core_subject', keyword)}. "
         f"{bi.get('detail_desc', '')}. "
@@ -1066,18 +1448,19 @@ async def _generate_single_body_image(
     )
     for attempt in range(3):
         try:
-            r = await http_client.post(
-                "https://api.openai.com/v1/images/generations",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
-                timeout=90,
-            )
-            r.raise_for_status()
-            img_url = r.json()["data"][0]["url"]
-            img_r   = await http_client.get(img_url, timeout=90)
+            async with sem:   # 동시 DALL-E 요청 최대 2개로 제한 (Rate Limit 방어)
+                r = await http_client.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
+                    timeout=90,
+                )
+                r.raise_for_status()
+                img_url = r.json()["data"][0]["url"]
+                img_r   = await http_client.get(img_url, timeout=90)
             fname   = f"{today}_main_{keyword[:10]}_{idx+1:02d}.png"
             fpath   = STATIC_DIR / fname
-            fpath.write_bytes(img_r.content)
+            await asyncio.to_thread(fpath.write_bytes, img_r.content)
             return {"url": f"/static/generated/{fname}", "alt": alt}
         except Exception as e:
             logger.warning(f"DALL-E 본문이미지 {idx+1} 시도 {attempt+1}/3 실패: {e}")
@@ -1086,24 +1469,86 @@ async def _generate_single_body_image(
     return {"url": "", "alt": alt}
 
 
-async def generate_body_images_dalle(run_id: str, kw_data: dict, keyword: str) -> list[dict]:
-    """DALL-E 4로 본문 실사 이미지 5개 asyncio.gather 병렬 생성"""
-    await log_step(run_id, "BODY_IMG", "본문 비주얼 병렬 렌더링 중 (5장)")
-    body_items = kw_data.get("body_images", [])[:5]
-    alt_texts  = kw_data.get("alt_texts", [])
-    today      = datetime.now().strftime("%Y%m%d")
+async def _generate_single_infographic(
+    idx: int, ig: dict, keyword: str, alt: str, today: str,
+    sem: asyncio.Semaphore,
+) -> dict:
+    """단일 인포그래픽 생성 (Retry 3회, Semaphore 동시 제한) — 병렬 호출용"""
+    key_points_str = " / ".join(ig.get("key_points", [keyword]))
+    prompt = (
+        f"A clean, modern infographic poster about '{ig.get('title', keyword)}'. "
+        f"Flat design style, {ig.get('color_scheme', 'green and white')} color scheme. "
+        f"Visually highlight these key points as icons or simple charts: {key_points_str}. "
+        f"No handwriting or decorative fonts. Use bold sans-serif labels only. "
+        f"Minimal background, high contrast, professional data visualization look. "
+        f"Layout: vertical card format, clear section dividers, icon-driven. 8k resolution."
+    )
+    for attempt in range(3):
+        try:
+            async with sem:
+                r = await http_client.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
+                    timeout=90,
+                    follow_redirects=False,
+                )
+                r.raise_for_status()
+                img_url = r.json()["data"][0]["url"]
+                img_r   = await http_client.get(img_url, timeout=90)
+            fname = f"{today}_infographic_{keyword[:10]}_{idx+1:02d}.png"
+            fpath = STATIC_DIR / fname
+            await asyncio.to_thread(fpath.write_bytes, img_r.content)
+            return {"url": f"/static/generated/{fname}", "alt": alt}
+        except Exception as e:
+            logger.warning(f"DALL-E 인포그래픽 {idx+1} 시도 {attempt+1}/3 실패: {e}")
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+    return {"url": "", "alt": alt}
 
-    tasks = [
+
+async def generate_body_images_dalle(run_id: str, kw_data: dict, keyword: str) -> list[dict]:
+    """DALL-E 3으로 실사 이미지 3개 + 인포그래픽 2개 asyncio.gather 병렬 생성 (총 5개)"""
+    await log_step(run_id, "BODY_IMG", "본문 비주얼 병렬 렌더링 중 (실사 3 + 인포그래픽 2)")
+    body_items  = kw_data.get("body_images",  [])[:3]   # 실사 이미지 3개
+    ig_items    = kw_data.get("infographics", [])[:2]   # 인포그래픽 2개
+    alt_texts   = kw_data.get("alt_texts", [])
+    today       = datetime.now().strftime("%Y%m%d")
+
+    sem = asyncio.Semaphore(2)   # 동시 DALL-E 요청 최대 2개 (Concurrency Bomb 방어)
+
+    # 실사 이미지 태스크 (인덱스 0~2)
+    body_tasks = [
         _generate_single_body_image(
             i, bi, keyword,
-            alt_texts[i] if i < len(alt_texts) else f"{keyword} 이미지 {i+1}",
-            today
+            alt_texts[i] if i < len(alt_texts) else f"{keyword} 실사 {i+1}",
+            today, sem,
         )
         for i, bi in enumerate(body_items)
     ]
-    results = list(await asyncio.gather(*tasks, return_exceptions=False))
+    # 인포그래픽 태스크 (인덱스 3~4 → alt_texts 기준)
+    ig_tasks = [
+        _generate_single_infographic(
+            i, ig, keyword,
+            alt_texts[3 + i] if (3 + i) < len(alt_texts) else f"{keyword} 인포그래픽 {i+1}",
+            today, sem,
+        )
+        for i, ig in enumerate(ig_items)
+    ]
+
+    # 실사·인포그래픽 동시 병렬 실행 — return_exceptions=True로 일부 실패 허용
+    all_raw = await asyncio.gather(*body_tasks, *ig_tasks, return_exceptions=True)
+
+    results = []
+    for i, r in enumerate(all_raw):
+        if isinstance(r, dict):
+            results.append(r)
+        else:
+            fallback_alt = alt_texts[i] if i < len(alt_texts) else f"{keyword} 이미지 {i+1}"
+            results.append({"url": "", "alt": fallback_alt})
+
     success = len([r for r in results if r.get("url")])
-    await log_step(run_id, "BODY_IMG", f"본문 비주얼 {success}/{len(tasks)}장 완료", "done")
+    await log_step(run_id, "BODY_IMG", f"본문 비주얼 {success}/{len(results)}장 완료 (실사+인포그래픽)", "done")
     return results
 
 # ────────────────────────────────────────────
@@ -1146,14 +1591,18 @@ JSON 형식으로만 응답 (백틱·설명 없이):
                 timeout=30,
             )
             r.raise_for_status()
-            raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            candidates = r.json().get("candidates", [])
+            if not candidates:
+                raise RuntimeError("Gemini 응답에 candidates 없음 (Safety 필터 또는 빈 응답)")
+            raw = candidates[0]["content"]["parts"][0]["text"]
             raw = re.sub(r"```json\s*|\s*```", "", raw).strip()
             result = json.loads(raw)
 
             # 하위 호환: keywords 리스트를 flat string 배열로도 제공
             flat_keywords = [
-                k["keyword"] if isinstance(k, dict) else k
+                (k.get("keyword") or k) if isinstance(k, dict) else k
                 for k in result.get("keywords", [])
+                if k
             ]
             result["keywords_flat"] = flat_keywords
             result["target_product"] = result.get("target_product", "")
@@ -1171,16 +1620,6 @@ JSON 형식으로만 응답 (백틱·설명 없이):
 # ────────────────────────────────────────────
 # Engagement 모듈 — 독립 컴포넌트 빌더
 # ────────────────────────────────────────────
-def _build_module_cta(keyword: str, revenue_link: str, target_product: str) -> str:
-    """Module A: 심리적 트리거 CTA 박스"""
-    product_label = target_product or f"{keyword} 추천 상품"
-    link_tag = f'<a href="{revenue_link}" class="revenue-link" rel="sponsored" style="color:#fff;text-decoration:none;font-weight:700">→ {product_label} 최저가 확인</a>' if revenue_link else f'<span style="font-weight:700">{product_label} 검색 추천</span>'
-    return f'''<div style="background:linear-gradient(135deg,#03C75A,#02a44c);border-radius:12px;padding:18px 22px;margin:20px 0;font-family:sans-serif;color:#fff">
-<p style="font-size:13px;margin:0 0 4px;opacity:.85">⏰ 지금 이 순간만</p>
-<p style="font-size:17px;font-weight:700;margin:0 0 10px">오늘 구매하면 가장 저렴해요</p>
-<p style="font-size:13px;margin:0 0 14px;opacity:.9">재고 소진 시 가격이 오를 수 있어요. 지금 바로 확인해보세요.</p>
-{link_tag}
-</div>'''
 
 
 async def _build_module_checklist(run_id: str, keyword: str, content: str) -> str:
@@ -1216,9 +1655,16 @@ JSON 배열만 출력 (다른 텍스트·설명 절대 금지):
             timeout=20,
         )
         r.raise_for_status()
-        raw   = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        candidates = r.json().get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini candidates 없음")
+        raw   = candidates[0]["content"]["parts"][0]["text"]
         raw   = re.sub(r"```json\s*|\s*```", "", raw).strip()
         items = json.loads(raw)
+        if isinstance(items, dict):
+            items = next(iter(items.values())) if items else []
+        if not isinstance(items, list):
+            items = []
 
         if not items:
             return ""
@@ -1278,9 +1724,16 @@ JSON 배열만 출력 (다른 텍스트·설명 절대 금지):
             timeout=20,
         )
         r.raise_for_status()
-        raw  = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        candidates = r.json().get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini candidates 없음")
+        raw  = candidates[0]["content"]["parts"][0]["text"]
         raw  = re.sub(r"```json\s*|\s*```", "", raw).strip()
         faqs = json.loads(raw)
+        if isinstance(faqs, dict):
+            faqs = next(iter(faqs.values())) if faqs else []
+        if not isinstance(faqs, list):
+            faqs = []
 
         faq_items = ""
         for i, faq in enumerate(faqs[:3]):
@@ -1346,7 +1799,10 @@ JSON 배열만 출력 (30개 정확히, 다른 텍스트 금지):
             timeout=20,
         )
         r.raise_for_status()
-        raw  = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        candidates = r.json().get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini candidates 없음")
+        raw  = candidates[0]["content"]["parts"][0]["text"]
         raw  = re.sub(r"```json\s*|\s*```", "", raw).strip()
         tags = json.loads(raw)
 
@@ -1380,12 +1836,9 @@ async def apply_engagement_modules(
     run_id: str,
     content_html: str,
     keyword: str,
-    persona: Persona,
     style: str,
-    cta_enabled: bool,
-    revenue_link: str,
     shopping: dict,
-) -> str:
+) -> tuple[str, list]:
     """
     Engagement 모듈 독립 주입 엔진.
     각 모듈 실패 시 원본 HTML 보호 — 전체 파이프라인 중단 없음.
@@ -1396,7 +1849,7 @@ async def apply_engagement_modules(
     target_product = shopping.get("target_product", "")
     flat_keywords  = shopping.get("keywords_flat", shopping.get("keywords", []))
     kw_str         = ", ".join(
-        k["keyword"] if isinstance(k, dict) else k
+        str(k.get("keyword", k)) if isinstance(k, dict) else str(k)
         for k in flat_keywords
     )
 
@@ -1409,25 +1862,6 @@ async def apply_engagement_modules(
             await log_step(run_id, "ENGAGE", "Module B (Checklist) 삽입 완료")
     except Exception as e:
         logger.warning(f"Module B 삽입 실패 — 원본 유지: {e}")
-
-    # ── Module A: CTA 박스 — 2번째 <h2> 직후 삽입 ──
-    try:
-        if cta_enabled:
-            cta_html = _build_module_cta(keyword, revenue_link, target_product)
-            h2_positions = [i for i in range(len(result)) if result[i:i+4] == "<h2>"]
-            if len(h2_positions) >= 2:
-                close_tag = result.find("</h2>", h2_positions[1])
-                if close_tag != -1:
-                    idx    = close_tag + len("</h2>")
-                    result = result[:idx] + "\n" + cta_html + result[idx:]
-                    await log_step(run_id, "ENGAGE", "Module A (CTA) 삽입 완료")
-            elif h2_positions:
-                close_tag = result.find("</h2>", h2_positions[0])
-                if close_tag != -1:
-                    idx    = close_tag + len("</h2>")
-                    result = result[:idx] + "\n" + cta_html + result[idx:]
-    except Exception as e:
-        logger.warning(f"Module A 삽입 실패 — 원본 유지: {e}")
 
     # ── Module C: Long-tail FAQ — 본문 끝 직전 삽입 ──
     # Gemini로 본문 맥락을 분석해 도메인에 맞는 FAQ 동적 생성
@@ -1471,6 +1905,7 @@ async def apply_engagement_modules(
                     "messages": [{"role": "user", "content": compare_prompt}],
                 },
                 timeout=60,
+                follow_redirects=False,  # POST→리디렉션→GET 전환으로 인한 404 방지
             )
             r.raise_for_status()
             result = r.json()["content"][0]["text"].strip()
@@ -1495,20 +1930,20 @@ async def apply_engagement_modules(
 # 하위 호환 alias
 async def enrich_engagement(
     run_id: str, content_html: str, keyword: str,
-    persona: Persona, style: str, cta_enabled: bool,
+    style: str, cta_enabled: bool,
     revenue_link: str, shopping: dict,
 ) -> tuple[str, list]:
     return await apply_engagement_modules(
-        run_id, content_html, keyword, persona,
+        run_id, content_html, keyword,
         style, cta_enabled, revenue_link, shopping
     )
 
 # ────────────────────────────────────────────
 # 백업 저장
 # ────────────────────────────────────────────
-def save_backup(run_id: str, keyword: str, title: str, content: str, tags: list, score: float) -> str:
+async def save_backup(run_id: str, keyword: str, title: str, content: str, tags: list, score: float) -> str:
     ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = f"blog_{ts}.json"
+    fname = f"blog_{ts}_{run_id[:8]}.json"
     fpath = BACKUP_DIR / fname
     data  = {
         "run_id":        run_id,
@@ -1520,16 +1955,15 @@ def save_backup(run_id: str, keyword: str, title: str, content: str, tags: list,
         "revenue_score": score,
         "posted":        False,
     }
-    fpath.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_str = json.dumps(data, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(fpath.write_text, json_str, encoding="utf-8")
     global _excluded_cache
     _excluded_cache = (set(), 0.0)  # 새 포스팅 → 제외 키워드 캐시 무효화
 
     # 사람이 읽기 쉬운 txt
     txt_path = OUTPUT_DIR / f"blog_{ts}.txt"
-    txt_path.write_text(
-        f"제목: {title}\n태그: {' '.join('#'+t for t in tags)}\n\n{content}",
-        encoding="utf-8"
-    )
+    txt_content = f"제목: {title}\n태그: {' '.join('#'+t for t in tags)}\n\n{content}"
+    await asyncio.to_thread(txt_path.write_text, txt_content, encoding="utf-8")
     return fname
 
 
@@ -1567,7 +2001,15 @@ app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
 from fastapi import Request
 from starlette.responses import JSONResponse
 
-HARU_PASSWORD = os.environ.get("HARU_PASSWORD", "cozy1234")
+HARU_PASSWORD = os.environ.get("HARU_PASSWORD", "")
+if not HARU_PASSWORD:
+    import secrets as _secrets
+    HARU_PASSWORD = _secrets.token_urlsafe(16)
+    logger.warning(
+        f"[보안] HARU_PASSWORD 환경변수가 설정되지 않았습니다. "
+        f"이번 세션 임시 비밀번호: {HARU_PASSWORD}  "
+        f"(영구 사용 시 .env에 HARU_PASSWORD=<값> 을 추가하세요)"
+    )
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -1605,6 +2047,8 @@ async def ws_pipeline(ws: WebSocket):
             await ws.receive_text()   # keep-alive ping
     except WebSocketDisconnect:
         ws_manager.disconnect(ws)
+    finally:
+        ws_manager.disconnect(ws)    # 예외·중단 시에도 좀비 소켓 제거 보장
 
 # ────────────────────────────────────────────
 # API 라우터
@@ -1622,7 +2066,7 @@ async def api_datalab():
 
 @app.get("/api/keywords/excluded")
 async def api_excluded():
-    return list(get_excluded_keywords())
+    return list(await get_excluded_keywords())
 
 @app.post("/api/revenue/log")
 async def api_revenue_log(entry: RevenueLogEntry):
@@ -1631,11 +2075,11 @@ async def api_revenue_log(entry: RevenueLogEntry):
         "keyword": entry.keyword, "event": entry.event,
         "score": score, "ts": datetime.now().isoformat()
     })
-    _persist_revenue_log()
+    await _persist_revenue_log()
     return {"ok": True}
 
 @app.post("/api/generate")
-async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
+async def api_generate(req: GenerateRequest):
     """
     Phase 1 — Text-First Pipeline
     이미지 생성 없이 원고·쇼핑키워드·Engagement 만 처리 → 빠른 응답
@@ -1658,27 +2102,29 @@ async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
 
     try:
         # 1. Revenue Score
-        score, match = calc_revenue_score(req.keyword)
+        score, match = await calc_revenue_score(req.keyword)
         await log_step(run_id, "SCORE", f"Revenue Score: {score:.1f} ({match})")
 
-        # 1-B. 실시간 뉴스 RAG 컨텍스트 수집 (Graceful Degradation)
+        # 1-B. 실시간 뉴스 RAG 컨텍스트 수집 (Google News RSS 1순위 / Naver API 보조)
         await log_step(run_id, "NEWS_RAG", f"뉴스 컨텍스트 수집 중 — {req.keyword}")
+        news_context = ""
         try:
-            news_context = await fetch_naver_news(req.keyword)
+            news_context = await fetch_news_context(req.keyword)
             if news_context:
-                await log_step(run_id, "NEWS_RAG", "뉴스 팩트 주입 완료 (3건)", "done")
+                cnt = news_context.count("[뉴스")
+                await log_step(run_id, "NEWS_RAG", f"뉴스 팩트 주입 완료 ({cnt}건)", "done")
             else:
-                await log_step(run_id, "NEWS_RAG", "뉴스 컨텍스트 없음 — 스킵", "warn")
+                await log_step(run_id, "NEWS_RAG", "뉴스 검색 결과 없음 — RAG 스킵", "warn")
         except Exception as e:
-            news_context = ""
-            await log_step(run_id, "NEWS_RAG", f"뉴스 수집 실패(스킵): {e}", "warn")
+            await log_step(run_id, "NEWS_RAG", f"뉴스 수집 오류 (스킵): {e}", "warn")
 
-        # 2. 원고 생성 — news_context 주입
-        # ▶ Claude Haiku + 실시간 뉴스 팩트 컨텍스트
+        # 2. 원고 생성 — news_context + user_context 주입
+        # ▶ Claude Haiku + 실시간 뉴스 팩트 컨텍스트 + 개인 관심사
         article = await generate_article(
             run_id, req.persona, req.keyword,
             req.config, req.post_history, match, req.revenue_link,
             news_context=news_context,
+            user_context=req.user_context or "",
         )
 
         # article 방어 — 폴백 딕셔너리는 "content" 키가 없을 수 있음
@@ -1695,7 +2141,7 @@ async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
         effective_style = (req.config.style or "").strip() or _strategy.get("style", "정보형")
         enriched_content, generated_tags = await enrich_engagement(
             run_id, article_content, req.keyword,
-            req.persona, effective_style, req.config.cta_enabled,
+            effective_style, req.config.cta_enabled,
             req.revenue_link, shopping,
         )
 
@@ -1703,14 +2149,14 @@ async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
         final_tags = generated_tags if generated_tags else article_tags
 
         # 5. 저장
-        backup_fname = save_backup(
+        backup_fname = await save_backup(
             run_id, req.keyword, article_title,
             enriched_content, final_tags, score
         )
         await log_step(run_id, "SAVE", f"드래프트 저장 완료: {backup_fname}", "done")
 
         pipeline_runs[run_id]["status"] = "text_done"
-        _persist_pipeline_runs()
+        await _persist_pipeline_runs()
         await log_step(run_id, "TEXT_DONE",
             "✓ 글 빌드 완료 — [AI 이미지] 버튼으로 비주얼을 생성하세요", "done")
 
@@ -1730,7 +2176,7 @@ async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
 
     except Exception as e:
         pipeline_runs[run_id]["status"] = "error"
-        _persist_pipeline_runs()
+        await _persist_pipeline_runs()
         await log_step(run_id, "ERROR", f"빌드 오류: {str(e)[:200]}", "error")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1738,7 +2184,7 @@ async def api_generate(req: GenerateRequest, bg: BackgroundTasks):
 @app.post("/api/generate/images")
 async def api_generate_images(req: ImageGenFromContentRequest):
     """
-    Phase 3 — On-Demand Image Generation
+    Phase 2 — On-Demand Image Generation
     수정된 본문(current_content)을 Gemini에 재분석 → DALL-E 병렬 생성
     Context-Aware: 편집된 핵심 피사체 변경사항 자동 반영
     """
@@ -1780,7 +2226,7 @@ async def api_generate_images(req: ImageGenFromContentRequest):
         pipeline_runs[run_id]["images_status"] = "done"
         pipeline_runs[run_id]["thumbnails"]    = thumbnails
         pipeline_runs[run_id]["body_images"]   = body_images
-        _persist_pipeline_runs()
+        await _persist_pipeline_runs()
 
         success_count = (
             len([u for u in thumbnails if u]) +
@@ -1798,7 +2244,7 @@ async def api_generate_images(req: ImageGenFromContentRequest):
 
     except Exception as e:
         pipeline_runs[run_id]["images_status"] = "error"
-        _persist_pipeline_runs()
+        await _persist_pipeline_runs()
         await log_step(run_id, "IMG_ERROR",
             f"비주얼 생성 오류: {str(e)[:200]}", "error")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1854,9 +2300,9 @@ async def api_image_gen(req: ImageGenRequest):
         imgs = await generate_body_images_dalle(run_id, kw_data, req.keyword)
         return {"urls": [i["url"] for i in imgs], "type": "body"}
 
-@app.get("/api/backups")
-async def api_backups():
-    results = []
+def _load_backups_sync() -> list[dict]:
+    """glob + stat + read_text 전체를 스레드 풀에서 실행 (stat() 폭풍 방지)"""
+    results: list[dict] = []
     for fp in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
         try:
             data = json.loads(fp.read_text(encoding="utf-8"))
@@ -1872,6 +2318,10 @@ async def api_backups():
             pass
     return results
 
+@app.get("/api/backups")
+async def api_backups():
+    return await asyncio.to_thread(_load_backups_sync)
+
 @app.patch("/api/backups/{fname}/posted")
 async def api_mark_posted(fname: str):
     safe_name = Path(fname).name          # 디렉터리 순회 차단
@@ -1880,9 +2330,10 @@ async def api_mark_posted(fname: str):
     fpath = BACKUP_DIR / safe_name
     if not fpath.exists():
         raise HTTPException(status_code=404)
-    data = json.loads(fpath.read_text(encoding="utf-8"))
+    data = json.loads(await asyncio.to_thread(fpath.read_text, encoding="utf-8"))
     data["posted"] = True
-    fpath.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    updated = json.dumps(data, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(fpath.write_text, updated, encoding="utf-8")
     return {"ok": True}
 
 
@@ -1924,12 +2375,12 @@ async def api_upload_image(file: "UploadFile"):
         raise HTTPException(400, f"허용되지 않는 파일 형식: {ext}")
     today    = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe     = re.sub(r"[^\w\-.]", "_", Path(file.filename).stem)[:30]
-    fname    = f"{today}_upload_{safe}{ext}"
+    fname    = f"{today}_upload_{safe}_{uuid.uuid4().hex[:6]}{ext}"
     fpath    = IMAGE_DIR / fname
     content  = await file.read()
     if len(content) > 20 * 1024 * 1024:   # 20 MB 제한
         raise HTTPException(413, "파일이 너무 큽니다 (최대 20MB)")
-    fpath.write_bytes(content)
+    await asyncio.to_thread(fpath.write_bytes, content)
     rel = fpath.relative_to(WRITABLE_DIR)
     return {"url": f"/static-file/{rel.as_posix()}", "filename": fname}
 

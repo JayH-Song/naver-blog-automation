@@ -27,17 +27,17 @@
 const STATE_KEY = 'haru_studio_state';
 
 const defaultState = {
-  persona:        null,
-  selectedKeyword:'',
-  style:          '정보 큐레이션',
-  tone:           '친근하고 부드럽게',
-  goldenTime:     'morning',
-  ctaEnabled:     true,
-  revenueLink:    '',
-  postHistory:    [],
-  personaColor:   '#2cc4a0',
-  lastResult:     null,
-  currentRunId:   null,   // Phase 3 On-Demand 이미지 생성용 run_id
+  personas:           [null, null, null],
+  selectedPersonaIdx: 0,
+  selectedKeyword:    '',
+  personalContext:    '',   // 키워드 관련 개인 관심사/경험
+  style:              '정보 큐레이션',
+  tone:               '친근하고 부드럽게',
+  goldenTime:         'morning',
+  postHistory:        [],
+  personaColor:       '#2cc4a0',
+  lastResult:         null,
+  currentRunId:       null,
 };
 
 let S = { ...defaultState };
@@ -46,7 +46,19 @@ function loadState() {
   try {
     const saved = localStorage.getItem(STATE_KEY);
     if (saved) S = { ...defaultState, ...JSON.parse(saved) };
+    // 구버전 S.persona → S.personas[0] 마이그레이션
+    if (S.persona && (!S.personas || !S.personas.some(Boolean))) {
+      S.personas = [S.persona, null, null];
+    }
+    if (!Array.isArray(S.personas) || S.personas.length !== 3)
+      S.personas = [null, null, null];
+    if (S.selectedPersonaIdx == null) S.selectedPersonaIdx = 0;
+    delete S.persona;
   } catch(e) {}
+}
+
+function currentPersona() {
+  return S.personas[S.selectedPersonaIdx] || null;
 }
 
 function saveState() {
@@ -110,32 +122,79 @@ function savePersona() {
   const career = document.getElementById('p-career').value.trim();
   const family = document.getElementById('p-family').value.trim();
   if (!job) { alert('직업을 입력해주세요'); return; }
-  S.persona = { job, age, career, family, theme_color: S.personaColor };
+  S.personas[S.selectedPersonaIdx] = { job, age, career, family, theme_color: S.personaColor };
   saveState();
+  renderPersonaSlots();
   renderPersonaBadge();
-  logTerm('PERSONA', `페르소나 저장 완료 — ${job}`, 'done');
+  logTerm('PERSONA', `슬롯 ${S.selectedPersonaIdx + 1} 저장 완료 — ${job}`, 'done');
 }
 
 function savePersonaFromSlideover() {
-  S.persona = {
-    job:    document.getElementById('so-job').value.trim() || S.persona?.job || '',
-    age:    document.getElementById('so-age').value.trim() || S.persona?.age || '',
-    career: document.getElementById('so-career').value.trim() || S.persona?.career || '',
-    family: document.getElementById('so-family').value.trim() || S.persona?.family || '',
+  const cur = currentPersona() || {};
+  S.personas[S.selectedPersonaIdx] = {
+    job:         document.getElementById('so-job').value.trim()    || cur.job    || '',
+    age:         document.getElementById('so-age').value.trim()    || cur.age    || '',
+    career:      document.getElementById('so-career').value.trim() || cur.career || '',
+    family:      document.getElementById('so-family').value.trim() || cur.family || '',
     theme_color: S.personaColor,
   };
   saveState();
+  renderPersonaSlots();
   renderPersonaBadge();
   closeDrawer();
-  logTerm('PERSONA', `페르소나 업데이트 완료 — ${S.persona.job}`, 'done');
+  logTerm('PERSONA', `슬롯 ${S.selectedPersonaIdx + 1} 업데이트 — ${S.personas[S.selectedPersonaIdx].job}`, 'done');
 }
 
 function renderPersonaBadge() {
+  const p = currentPersona();
+  if (!p) return;
   document.getElementById('persona-setup').style.display = 'none';
-  document.getElementById('persona-badge').style.display = 'block';
-  document.getElementById('badge-name').textContent = `${S.persona.job} · ${S.persona.age}`;
-  document.getElementById('badge-meta').textContent = S.persona.career.slice(0, 40);
-  applyPersonaColor(S.personaColor);
+  const badge = document.getElementById('persona-badge');
+  badge.style.display = 'block';
+  badge.classList.remove('persona-fade');
+  void badge.offsetWidth;              // reflow → 애니메이션 재트리거
+  badge.classList.add('persona-fade');
+  document.getElementById('badge-name').textContent = `${p.job} · ${p.age}`;
+  document.getElementById('badge-meta').textContent = (p.career || '').slice(0, 40);
+  applyPersonaColor(p.theme_color || S.personaColor);
+}
+
+function renderPersonaSlots() {
+  const container = document.getElementById('persona-slots');
+  if (!container) return;
+  container.innerHTML = '';
+  S.personas.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = [
+      'persona-slot-btn',
+      i === S.selectedPersonaIdx ? 'active' : '',
+      !p ? 'empty' : '',
+    ].join(' ').trim();
+    btn.title = p ? p.job : '미설정';
+    btn.innerHTML = `<i data-lucide="user"></i><span>${i + 1}</span>`;
+    btn.onclick = () => selectPersonaSlot(i);
+    container.appendChild(btn);
+  });
+  if (window.lucide) lucide.createIcons({ el: container });
+}
+
+function selectPersonaSlot(idx) {
+  S.selectedPersonaIdx = idx;
+  saveState();
+  renderPersonaSlots();
+  const p = currentPersona();
+  if (p) {
+    S.personaColor = p.theme_color || '#2cc4a0';
+    renderPersonaBadge();
+  } else {
+    document.getElementById('persona-badge').style.display = 'none';
+    document.getElementById('persona-setup').style.display = 'flex';
+    ['p-job', 'p-age', 'p-career', 'p-family'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    applyPersonaColor('#2cc4a0');
+  }
 }
 
 function setPersonaColor(color) {
@@ -154,7 +213,6 @@ function selectInitColor(color, el) {
 }
 
 function applyPersonaColor(color) {
-  // 네이버 그린 포인트 컬러 고정
   document.documentElement.style.setProperty('--persona-accent', '#03C75A');
 }
 
@@ -355,13 +413,15 @@ function openDrawer(id) {
   // 모바일 전략 패널 닫기
   document.getElementById('left')?.classList.remove('mobile-open');
 
-  if (id === 'persona-drawer' && S.persona) {
-    document.getElementById('so-job').value    = S.persona.job    || '';
-    document.getElementById('so-age').value    = S.persona.age    || '';
-    document.getElementById('so-career').value = S.persona.career || '';
-    document.getElementById('so-family').value = S.persona.family || '';
+  if (id === 'persona-drawer') {
+    const p = currentPersona();
+    document.getElementById('so-job').value    = p?.job    || '';
+    document.getElementById('so-age').value    = p?.age    || '';
+    document.getElementById('so-career').value = p?.career || '';
+    document.getElementById('so-family').value = p?.family || '';
+    const color = p?.theme_color || S.personaColor;
     document.querySelectorAll('#so-colors .color-chip').forEach(c => {
-      c.classList.toggle('active', c.dataset.color === S.personaColor);
+      c.classList.toggle('active', c.dataset.color === color);
     });
   }
 
@@ -373,6 +433,7 @@ function openDrawer(id) {
 function closeDrawer() {
   document.querySelectorAll('.side-drawer').forEach(d => d.classList.remove('open'));
   document.getElementById('left')?.classList.remove('mobile-open');
+  document.getElementById('right')?.classList.remove('mobile-open');
   document.getElementById('drawer-backdrop')?.classList.remove('show');
   document.body.style.overflow = '';
   if (window.innerWidth <= 768) {
@@ -427,6 +488,7 @@ function setManualKeyword() {
   saveState();
   renderKeywordCards([{ keyword: kw, revenue_score: 0, match_type: 'none', excluded: false }]);
   logTerm('KW', `수동 키워드 설정: ${kw}`, 'done');
+  showPersonalContextSection(kw);
 }
 
 function renderKwSkeletons() {
@@ -463,6 +525,7 @@ function renderKeywordCards(list) {
         updateRevenueScore(score, item.match_type);
         saveState();
         logTerm('KW', `키워드 선택: ${item.keyword} (Score: ${score})`, 'done');
+        showPersonalContextSection(item.keyword);
       };
     }
     container.appendChild(card);
@@ -487,25 +550,6 @@ function setPill(groupId, el) {
   saveState();
 }
 
-function toggleCta() {
-  const t = document.getElementById('cta-toggle');
-  S.ctaEnabled = !S.ctaEnabled;
-  t.classList.toggle('on', S.ctaEnabled);
-  saveState();
-}
-
-function armRevenueLink() {
-  const val = document.getElementById('revenue-link-input').value.trim();
-  S.revenueLink = val;
-  saveState();
-  const input = document.getElementById('revenue-link-input');
-  if (val) {
-    input.classList.add('link-armed');
-    logTerm('REVENUE', `링크 활성화 완료 — ${val.slice(0,40)}...`, 'done');
-  } else {
-    input.classList.remove('link-armed');
-  }
-}
 
 /* ─── Post History ─── */
 function addPostHistoryRow() {
@@ -537,7 +581,7 @@ function removePostHistory(idx, rowEl) {
 
 /* ─── 메인 생성 파이프라인 ─── */
 async function generate() {
-  if (!S.persona) { alert('페르소나를 먼저 설정하세요'); return; }
+  if (!currentPersona()) { alert('페르소나를 먼저 설정하세요'); return; }
   if (!S.selectedKeyword) { alert('키워드를 선택하세요'); return; }
   if (!editor) { alert('에디터가 초기화되지 않았습니다. 새로고침하세요.'); return; }
 
@@ -552,20 +596,22 @@ async function generate() {
   editor.commands.setContent(`<p class="stream-cursor"><strong>${S.selectedKeyword}</strong> 글을 빌드하고 있어요...</p>`);
 
   try {
+    const personalCtx = (document.getElementById('personal-context-input')?.value || S.personalContext || '').trim();
+
     const payload = {
-      persona:      S.persona,
+      persona:      currentPersona(),   // 현재 슬롯 데이터만 전송 (백엔드 단일 객체 형식 유지)
       keyword:      S.selectedKeyword,
+      user_context: personalCtx,
       config: {
         style:       S.style,
         tone:        S.tone,
         golden_time: S.goldenTime,
-        cta_enabled: S.ctaEnabled,
       },
       post_history:  S.postHistory.filter(p => p.title || p.url),
-      revenue_link:  S.revenueLink,
     };
 
     logTerm('GEN', `글 빌드 시작 — ${S.selectedKeyword}`);
+    if (personalCtx) logTerm('GEN', `개인 관심사 반영 — "${personalCtx.slice(0, 50)}${personalCtx.length > 50 ? '...' : ''}"`, 'done');
     setProgress(15);
 
     const result = await apiFetch('/api/generate', 'POST', payload, 180000);
@@ -577,11 +623,11 @@ async function generate() {
     checkForbiddenWords();
     updateRevenueScore(result.revenue_score || 0, result.revenue_match || 'none');
     renderShoppingKw(result.shopping || {});
-    renderOSMU(result.osmu || {});
 
     // run_id 저장 (Phase 3 이미지 생성에 사용)
     S.lastResult  = result;
     S.currentRunId = result.run_id;
+    setArticleTitle(result.title || '');
     saveState();
 
     // 이미지 갤러리는 placeholder 유지
@@ -593,12 +639,6 @@ async function generate() {
     const imgHint = document.getElementById('img-gen-hint');
     if (imgBtn)  { imgBtn.disabled = false; }
     if (imgHint) { imgHint.textContent = '편집 후 클릭하여 비주얼을 생성하세요'; }
-
-    // Harvest Bar 버튼 활성화
-    ['harvest-btn-title', 'harvest-btn-tags'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.disabled = false;
-    });
 
     setProgress(100);
     logTerm('TEXT_DONE', `✓ 글 빌드 완료 — ${result.title?.slice(0,20)} | [AI 이미지] 버튼으로 비주얼 생성`, 'done');
@@ -679,6 +719,46 @@ async function triggerImageGeneration() {
     imgSpinner.style.display = 'none';
     imgLabel.textContent     = 'AI 이미지 생성';
     imgBtn.disabled          = false;
+  }
+}
+
+/* ─── Personal Angle — 개인 관심사 입력 ─── */
+
+function showPersonalContextSection(keyword) {
+  const section = document.getElementById('personal-context-section');
+  const prompt  = document.getElementById('personal-context-prompt');
+  if (!section || !prompt) return;
+  prompt.textContent = `"${keyword}"와 관련해서 어떤 개인적인 경험이나 관심사가 있으신가요? (선택사항)`;
+  section.style.display = 'block';
+  _updatePcBadge();
+}
+
+function savePersonalContext() {
+  const val = (document.getElementById('personal-context-input')?.value || '').trim();
+  S.personalContext = val;
+  saveState();
+  _updatePcBadge();
+}
+
+function skipPersonalContext() {
+  const ta = document.getElementById('personal-context-input');
+  if (ta) ta.value = '';
+  S.personalContext = '';
+  saveState();
+  _updatePcBadge();
+  document.getElementById('personal-context-section').style.display = 'none';
+}
+
+function _updatePcBadge() {
+  const badge = document.getElementById('pc-active-badge');
+  if (!badge) return;
+  const ctx = S.personalContext?.trim();
+  if (ctx) {
+    badge.textContent = `✦ 개인 관심사 반영 중 — "${ctx.slice(0, 40)}${ctx.length > 40 ? '...' : ''}"`;
+    badge.classList.add('visible');
+  } else {
+    badge.textContent = '';
+    badge.classList.remove('visible');
   }
 }
 
@@ -792,31 +872,6 @@ async function downloadImage(url, filename) {
   }
 }
 
-/* ─── OSMU 렌더링 ─── */
-function renderOSMU(osmu) {
-  const container = document.getElementById('osmu-content');
-  const placeholder = document.getElementById('osmu-placeholder');
-  if (!container || !placeholder) return;
-  
-  if (!osmu || (!osmu.youtube_shorts && !osmu.instagram_feed)) {
-    container.style.display = 'none';
-    placeholder.style.display = 'block';
-    return;
-  }
-  placeholder.style.display = 'none';
-  container.style.display = 'flex';
-  document.getElementById('osmu-shorts').value = osmu.youtube_shorts || '생성된 대본이 없습니다.';
-  document.getElementById('osmu-insta').value = osmu.instagram_feed || '생성된 피드 텍스트가 없습니다.';
-}
-
-window.copyOSMU = function(type) {
-  const text = type === 'youtube_shorts' ? document.getElementById('osmu-shorts').value : document.getElementById('osmu-insta').value;
-  if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    alert('복사되었습니다.');
-    logTerm('OSMU', type === 'youtube_shorts' ? '쇼츠 대본 복사 완료' : '인스타 피드 복사 완료', 'done');
-  });
-}
 
 /* ─── 인라인 이미지 생성 ─── */
 async function generateImage(type) {
@@ -929,7 +984,95 @@ function insertEngagementBlock(type) {
 }
 
 /* ─── Harvest Modal ─── */
-let harvestChecks = [false, false, false, false, false];
+let harvestChecks   = [false, false, false];
+let manualOverrides = [false, false, false];
+
+/* ─── 에디터 상단 제목 칸 ─── */
+function setArticleTitle(title) {
+  const el = document.getElementById('article-title-input');
+  if (el) el.value = title || '';
+}
+
+function onArticleTitleInput(val) {
+  if (S.lastResult) S.lastResult.title = val;
+  // 모달 제목 칸도 동기화
+  const modal = document.getElementById('harvest-title-input');
+  if (modal) modal.value = val;
+  reVerifyItem(3);
+}
+
+async function copyArticleTitle() {
+  const val = document.getElementById('article-title-input')?.value.trim();
+  if (!val) { logTerm('HARVEST', '복사할 제목이 없습니다', 'warn'); return; }
+  try {
+    await navigator.clipboard.writeText(val);
+  } catch(e) {
+    const tmp = document.createElement('textarea');
+    tmp.value = val;
+    document.body.appendChild(tmp);
+    tmp.select();
+    document.execCommand('copy');
+    document.body.removeChild(tmp);
+  }
+  logTerm('HARVEST', `제목 복사 완료 — ${val.slice(0, 30)}`, 'done');
+  _flashBtn('article-title-copy-btn');  // 버튼 피드백 재사용 불가(class이므로 직접 처리)
+}
+
+function onHarvestTitleInput(val) {
+  if (S.lastResult) S.lastResult.title = val;
+  // 에디터 상단 제목 칸도 동기화
+  setArticleTitle(val);
+  reVerifyItem(3);
+}
+
+async function copyHarvestTitle() {
+  const val = document.getElementById('harvest-title-input')?.value.trim();
+  if (!val) return;
+  try {
+    await navigator.clipboard.writeText(val);
+    logTerm('HARVEST', `제목 복사 완료 — ${val.slice(0, 30)}`, 'done');
+  } catch(e) {
+    const tmp = document.createElement('textarea');
+    tmp.value = val;
+    document.body.appendChild(tmp);
+    tmp.select();
+    document.execCommand('copy');
+    document.body.removeChild(tmp);
+    logTerm('HARVEST', '제목 복사 완료 (fallback)', 'done');
+  }
+}
+
+function autoVerifyHarvestChecks() {
+  const html    = editor.getHTML();
+  const keyword = (S.selectedKeyword || '').trim();
+
+  // 파싱 실패 상태 감지 — 에러 content가 에디터에 있으면 모두 실패 처리
+  if (html.includes('원고 파싱에 실패') || html.includes('글을 빌드하세요')) {
+    return [false, false, false, false];
+  }
+
+  // 유효 원고 최소 길이 가드 (에러 메시지 수준의 짧은 content)
+  const textLen = editor.getText().trim().length;
+  if (textLen < 200) {
+    return [false, false, false];
+  }
+
+  // 0: 금지 접속어 — checkForbiddenWords() 반환값 활용
+  const r0 = !!checkForbiddenWords();
+
+  // 1: FAQ / 핵심요약 — schema.org 마크업 또는 자가진단 체크리스트로만 판정
+  const r1 = html.includes('schema.org/FAQPage')
+    || html.includes('자가진단 체크리스트');
+
+  // 2: 제목에 키워드 포함 여부
+  // S.lastResult.title 우선 신뢰, 없으면 에디터 첫 h1/h2 텍스트로 판정
+  const resultTitle   = S.lastResult?.title || '';
+  const editorHeading = document.querySelector('.ProseMirror h1, .ProseMirror h2')?.textContent?.trim() || '';
+  const titleSrc = resultTitle || editorHeading;
+  const r2 = keyword ? titleSrc.includes(keyword) : false;
+
+  return [r0, r1, r2];
+}
 
 function openHarvestModal() {
   if (!S.lastResult && !editor.getText().trim()) {
@@ -937,25 +1080,235 @@ function openHarvestModal() {
     return;
   }
   document.getElementById('harvest-modal').classList.add('open');
+
+  // 모달 제목 칸 — 에디터 상단 제목 칸 값 우선, 없으면 lastResult
+  const titleInput = document.getElementById('harvest-title-input');
+  if (titleInput) {
+    const editorTitle = document.getElementById('article-title-input')?.value.trim();
+    titleInput.value = editorTitle || S.lastResult?.title || '';
+  }
+
+  // 열릴 때마다 수동 확인 초기화
+  manualOverrides = [false, false, false];
+
+  // 자동 검증
+  const results = autoVerifyHarvestChecks();
+  harvestChecks = [...results];
+
+  results.forEach((pass, idx) => {
+    const item = document.querySelector(`.check-item[data-idx="${idx}"]`);
+    if (!item) return;
+    item.classList.remove('checked', 'failed', 'manual');
+    item.classList.add(pass ? 'checked' : 'failed');
+    const statusEl = item.querySelector('.check-status');
+    if (statusEl) {
+      if (pass) {
+        statusEl.textContent = '자동 확인';
+        statusEl.onclick     = null;
+        statusEl.title       = '';
+      } else {
+        statusEl.textContent = '확인 필요';
+        statusEl.onclick     = () => manualOverrideCheck(idx);
+        statusEl.title       = '수동으로 확인 처리하려면 클릭하세요';
+      }
+    }
+  });
+
+  const summary = document.getElementById('harvest-summary');
+  if (summary) summary.classList.add('visible');
+  _updateHarvestSummary();
+  _updateConfirmBtn();
 }
 
 function closeHarvestModal() {
   document.getElementById('harvest-modal').classList.remove('open');
-  harvestChecks = [false, false, false, false, false];
-  document.querySelectorAll('.check-item').forEach(c => c.classList.remove('checked'));
+  harvestChecks   = [false, false, false];
+  manualOverrides = [false, false, false];
+  const _ti = document.getElementById('harvest-title-input');
+  if (_ti) _ti.value = '';
+  document.querySelectorAll('.check-item').forEach(c => {
+    c.classList.remove('checked', 'failed', 'manual');
+    const s = c.querySelector('.check-status');
+    if (s) { s.textContent = ''; s.onclick = null; s.title = ''; }
+  });
+  const summary = document.getElementById('harvest-summary');
+  if (summary) { summary.textContent = ''; summary.classList.remove('visible'); }
   document.getElementById('confirm-copy-btn').disabled = true;
 }
 
-function toggleCheck(idx) {
-  harvestChecks[idx] = !harvestChecks[idx];
-  document.querySelector(`.check-item[data-idx="${idx}"]`).classList.toggle('checked', harvestChecks[idx]);
-  document.getElementById('confirm-copy-btn').disabled = !harvestChecks.every(Boolean);
+/* 항목 재검증 — fix 후 개별 항목 상태 갱신 */
+function reVerifyItem(idx) {
+  const results = autoVerifyHarvestChecks();
+  harvestChecks[idx] = results[idx];
+  // 자동 검증 통과 시 수동 확인도 자동 해제
+  if (results[idx]) manualOverrides[idx] = false;
+
+  const item = document.querySelector(`.check-item[data-idx="${idx}"]`);
+  if (!item) return;
+  item.classList.remove('checked', 'failed', 'manual');
+  item.classList.add(results[idx] ? 'checked' : 'failed');
+  const statusEl = item.querySelector('.check-status');
+  if (statusEl) {
+    if (results[idx]) {
+      statusEl.textContent = '자동 확인';
+      statusEl.onclick     = null;
+      statusEl.title       = '';
+    } else {
+      statusEl.textContent = '확인 필요';
+      statusEl.onclick     = () => manualOverrideCheck(idx);
+      statusEl.title       = '수동으로 확인 처리하려면 클릭하세요';
+    }
+  }
+  _updateHarvestSummary();
+  _updateConfirmBtn();
+}
+
+/* ── 확인 버튼 활성화 조건 ── */
+function _updateConfirmBtn() {
+  const allDone = harvestChecks.every((v, i) => v || manualOverrides[i]);
+  document.getElementById('confirm-copy-btn').disabled = !allDone;
+}
+
+/* ── 요약 텍스트 업데이트 ── */
+function _updateHarvestSummary() {
+  const autoCount   = harvestChecks.filter(Boolean).length;
+  const manualCount = manualOverrides.filter(Boolean).length;
+  const totalPassed = harvestChecks.reduce((acc, v, i) => acc + ((v || manualOverrides[i]) ? 1 : 0), 0);
+  const summary = document.getElementById('harvest-summary');
+  if (!summary) return;
+  if (autoCount === 0 && manualCount === 0) {
+    summary.textContent = '⚠ 원고 빌드 완료 후 다시 시도하세요';
+    summary.style.color = 'var(--red)';
+  } else if (totalPassed === 4 && manualCount === 0) {
+    summary.textContent = '4 / 4 자동 확인 완료';
+    summary.style.color = 'var(--emerald)';
+  } else if (totalPassed === 4) {
+    summary.textContent = `4 / 4 확인 완료 (수동 확인 ${manualCount}개 포함)`;
+    summary.style.color = 'var(--amber)';
+  } else {
+    summary.textContent = `${totalPassed} / 5 확인 완료`;
+    summary.style.color = 'var(--amber)';
+  }
+}
+
+/* ── 수동 확인 토글 ── */
+function manualOverrideCheck(idx) {
+  manualOverrides[idx] = !manualOverrides[idx];
+  const item = document.querySelector(`.check-item[data-idx="${idx}"]`);
+  if (!item) return;
+  const statusEl = item.querySelector('.check-status');
+  if (manualOverrides[idx]) {
+    item.classList.remove('failed');
+    item.classList.add('manual');
+    if (statusEl) {
+      statusEl.textContent = '수동 확인';
+      statusEl.title       = '클릭하면 수동 확인을 취소합니다';
+      statusEl.onclick     = () => manualOverrideCheck(idx);
+    }
+  } else {
+    item.classList.remove('manual');
+    item.classList.add('failed');
+    if (statusEl) {
+      statusEl.textContent = '확인 필요';
+      statusEl.title       = '수동으로 확인 처리하려면 클릭하세요';
+      statusEl.onclick     = () => manualOverrideCheck(idx);
+    }
+  }
+  _updateHarvestSummary();
+  _updateConfirmBtn();
+}
+
+/* ── 개별 수정 함수 ── */
+
+function _fix1_forbiddenWords() {
+  const text = editor.getText();
+  const found = FORBIDDEN.filter(w => text.includes(w));
+  if (!found.length) { reVerifyItem(1); return; }
+  // HTML 텍스트 노드에서만 금지어 제거 (태그 속성은 건드리지 않음)
+  let html = editor.getHTML();
+  found.forEach(w => {
+    html = html.replace(new RegExp(`(?<=>)([^<]*)${w}([^<]*)(?=<)`, 'g'),
+      (_, pre, post) => `>${pre}${post}<`.slice(1, -1));
+  });
+  editor.commands.setContent(html);
+  logTerm('FIX', `금지 접속어 제거 완료 — ${found.join(', ')}`, 'done');
+  reVerifyItem(1);
+}
+
+function _fix3_faqBlock() {
+  const kw = S.selectedKeyword || '주제';
+  const faqHtml = `
+<div itemscope itemtype="https://schema.org/FAQPage" style="margin:32px 0;padding:24px;background:#f8f9fa;border-radius:10px;border:1px solid #e5e7eb;">
+<h2 style="font-size:17px;font-weight:700;margin-bottom:16px;">❓ ${kw} 자주 묻는 질문 TOP 3</h2>
+<div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question" style="margin-bottom:14px;">
+<h3 itemprop="name" style="font-size:14px;font-weight:600;margin-bottom:6px;">${kw}을(를) 처음 시작할 때 무엇부터 준비해야 할까요?</h3>
+<div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text" style="font-size:13px;color:#555;">기초 준비물과 방법을 여기에 입력하세요.</p></div>
+</div>
+<div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question" style="margin-bottom:14px;">
+<h3 itemprop="name" style="font-size:14px;font-weight:600;margin-bottom:6px;">${kw} 초보자가 가장 많이 하는 실수는 무엇인가요?</h3>
+<div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text" style="font-size:13px;color:#555;">흔한 실수와 해결 방법을 여기에 입력하세요.</p></div>
+</div>
+<div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+<h3 itemprop="name" style="font-size:14px;font-weight:600;margin-bottom:6px;">${kw} 관련 비용이 얼마나 드나요?</h3>
+<div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text" style="font-size:13px;color:#555;">예상 비용 범위와 절약 팁을 여기에 입력하세요.</p></div>
+</div>
+</div>`;
+  editor.commands.setContent(editor.getHTML() + faqHtml);
+  logTerm('FIX', 'FAQ 블록(schema.org)을 원고 하단에 삽입했습니다 — 내용을 수정하세요', 'done');
+  reVerifyItem(3);
+}
+
+function _fix4_seoTitle() {
+  const keyword = S.selectedKeyword;
+  if (!keyword) {
+    logTerm('FIX', '키워드가 선택되지 않았습니다', 'warn');
+    return;
+  }
+  // S.lastResult.title에 키워드가 이미 포함되어 있으면 에디터 수정 없이 통과
+  if (S.lastResult?.title?.includes(keyword)) {
+    reVerifyItem(4);
+    return;
+  }
+  let html = editor.getHTML();
+  // H1 또는 H2 — 첫 번째 헤딩을 대상으로 처리
+  const headMatch = html.match(/<(h1|h2)([^>]*)>([\s\S]*?)<\/\1>/i);
+  if (!headMatch) {
+    logTerm('FIX', '에디터에 H1/H2 제목이 없습니다 — 제목 줄을 먼저 추가하세요', 'warn');
+    return;
+  }
+  const tag     = headMatch[1];
+  const attrs   = headMatch[2];
+  const curText = headMatch[3].replace(/<[^>]+>/g, '').trim();
+  if (curText.includes(keyword)) {
+    if (S.lastResult) S.lastResult.title = curText;
+    reVerifyItem(4);
+    return;
+  }
+  const newTitle = `${keyword} — ${curText}`;
+  html = html.replace(/<(h1|h2)([^>]*)>[\s\S]*?<\/\1>/i, `<${tag}${attrs}>${newTitle}</${tag}>`);
+  editor.commands.setContent(html);
+  if (S.lastResult) S.lastResult.title = newTitle;
+  logTerm('FIX', `제목에 키워드를 삽입했습니다 — ${newTitle.slice(0, 40)}`, 'done');
+  reVerifyItem(4);
+}
+
+/* ── fixCheck 디스패처 ── */
+function fixCheck(idx, e) {
+  if (e) e.stopPropagation();
+  switch (idx) {
+    case 0: _fix1_forbiddenWords(); break;
+    case 1: _fix3_faqBlock();       break;
+    case 2: _fix4_seoTitle();       break;
+  }
 }
 
 async function doHtmlCopy() {
-  // Revenue link 미장전 경고
-  if (!S.revenueLink && S.ctaEnabled) {
-    if (!confirm('Revenue Link가 장전되지 않았습니다. 그래도 복사하시겠습니까?')) return;
+  // 수동 확인 항목이 있으면 한 번 더 고지
+  const _MANUAL_LABELS = ['금지 접속어', 'FAQ/요약', '제목 SEO'];
+  const _skipped = manualOverrides.map((v, i) => v ? _MANUAL_LABELS[i] : null).filter(Boolean);
+  if (_skipped.length > 0) {
+    if (!confirm(`아래 항목은 자동 검증을 통과하지 못했으나 수동 확인 처리되었습니다:\n\n${_skipped.join('\n')}\n\n그래도 내보내시겠습니까?`)) return;
+    logTerm('HARVEST', `수동 확인 포함 내보내기 — ${_skipped.join(', ')}`, 'warn');
   }
   try {
     const html    = editor.getHTML();
@@ -978,56 +1331,6 @@ async function doHtmlCopy() {
   }
 }
 
-async function copyTitle() {
-  const title = S.lastResult?.title
-    || document.querySelector('.ProseMirror h1')?.textContent?.trim()
-    || '';
-  if (!title) {
-    logTerm('HARVEST', '담을 제목이 없습니다 — 먼저 글을 빌드하세요', 'error');
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(title);
-    logTerm('HARVEST', `✓ 제목 담기 완료 — ${title.slice(0,30)}`, 'done');
-    _flashBtn('harvest-btn-title');
-  } catch(e) {
-    logTerm('HARVEST', `제목 담기 실패: ${e.message}`, 'error');
-    // 폴백: execCommand
-    const tmp = document.createElement('textarea');
-    tmp.value = title;
-    document.body.appendChild(tmp);
-    tmp.select();
-    document.execCommand('copy');
-    document.body.removeChild(tmp);
-    logTerm('HARVEST', `✓ 제목 담기 완료 (fallback)`, 'done');
-    _flashBtn('harvest-btn-title');
-  }
-}
-
-async function copyTags() {
-  const rawTags = S.lastResult?.tags || [];
-  if (!rawTags.length) {
-    logTerm('HARVEST', '복사할 태그가 없습니다 — 먼저 글을 빌드하세요', 'error');
-    return;
-  }
-  const tags = rawTags.map(t => `#${t}`).join(' ');
-  try {
-    await navigator.clipboard.writeText(tags);
-    logTerm('HARVEST', `✓ 태그 ${rawTags.length}개 복사 — ${tags.slice(0,50)}`, 'done');
-    _flashBtn('harvest-btn-tags');
-  } catch(e) {
-    logTerm('HARVEST', `태그 복사 실패: ${e.message}`, 'error');
-    // 폴백: execCommand
-    const tmp = document.createElement('textarea');
-    tmp.value = tags;
-    document.body.appendChild(tmp);
-    tmp.select();
-    document.execCommand('copy');
-    document.body.removeChild(tmp);
-    logTerm('HARVEST', `✓ 태그 복사 완료 (fallback)`, 'done');
-    _flashBtn('harvest-btn-tags');
-  }
-}
 
 const _CHECK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
 
@@ -1067,7 +1370,6 @@ const STEP_TAGS = {
   KW:        { label: 'INSIGHT',   cls: 'insight' },
   ENGAGE:    { label: 'ENRICH',    cls: 'enrich'  },
   SHOP_KW:   { label: 'ENRICH',    cls: 'enrich'  },
-  OSMU:      { label: 'OSMU',      cls: 'enrich'  },
   HARVEST:   { label: 'PUBLISH',   cls: 'publish' },
   PERSONA:   { label: 'SYSTEM',    cls: 'system'  },
   SYSTEM:    { label: 'SYSTEM',    cls: 'system'  },
@@ -1079,6 +1381,13 @@ const STEP_TAGS = {
   ERROR:     { label: 'ERROR',     cls: 'error'   },
   JS_ERR:    { label: 'ERROR',     cls: 'error'   },
 };
+
+function toggleTerminal() {
+  const term  = document.getElementById('terminal');
+  const badge = document.getElementById('log-unread-badge');
+  const isOpen = term.classList.toggle('log-open');
+  if (isOpen && badge) badge.classList.remove('show');
+}
 
 function logTerm(step, msg, status = '') {
   const log  = document.getElementById('term-log');
@@ -1095,6 +1404,12 @@ function logTerm(step, msg, status = '') {
   `;
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
+
+  // 패널이 닫혀 있으면 뱃지 표시
+  const term = document.getElementById('terminal');
+  if (!term?.classList.contains('log-open')) {
+    document.getElementById('log-unread-badge')?.classList.add('show');
+  }
 
   if (STEP_PROGRESS[step]) setProgress(STEP_PROGRESS[step]);
 }
@@ -1153,25 +1468,35 @@ async function apiFetch(url, method = 'GET', body = null, timeout = 30000) {
 
 /* ─── Mobile 탭 (Bottom Sheet) ─── */
 function showMobileTab(panel) {
-  // 탭 active 표시 업데이트
   document.querySelectorAll('.mobile-tab').forEach(t => {
     t.classList.toggle('active', t.dataset.panel === panel);
   });
 
+  const left  = document.getElementById('left');
+  const right = document.getElementById('right');
+
   if (panel === 'left') {
-    // 이미지 드로어 닫고 전략 패널 토글
     document.querySelectorAll('.side-drawer').forEach(d => d.classList.remove('open'));
-    const left = document.getElementById('left');
+    right?.classList.remove('mobile-open');
     const isOpen = !left.classList.contains('mobile-open');
     left.classList.toggle('mobile-open', isOpen);
     document.getElementById('drawer-backdrop').classList.toggle('show', isOpen);
     document.body.style.overflow = isOpen ? 'hidden' : '';
+  } else if (panel === 'right') {
+    document.querySelectorAll('.side-drawer').forEach(d => d.classList.remove('open'));
+    left?.classList.remove('mobile-open');
+    const isOpen = !right.classList.contains('mobile-open');
+    right.classList.toggle('mobile-open', isOpen);
+    document.getElementById('drawer-backdrop').classList.toggle('show', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
   } else if (panel === 'center') {
-    // 모든 오버레이 닫기, 에디터 포커스
+    left?.classList.remove('mobile-open');
+    right?.classList.remove('mobile-open');
     closeDrawer();
     if (editor) setTimeout(() => editor.commands.focus(), 100);
   } else if (panel === 'images') {
-    document.getElementById('left')?.classList.remove('mobile-open');
+    left?.classList.remove('mobile-open');
+    right?.classList.remove('mobile-open');
     openDrawer('image-drawer');
   }
 }
@@ -1247,8 +1572,9 @@ document.addEventListener('DOMContentLoaded', () => {
   connectWS();
 
   // 저장된 상태 복원 (editor 불필요한 항목)
-  if (S.persona) renderPersonaBadge();
-  if (S.personaColor) applyPersonaColor(S.personaColor);
+  renderPersonaSlots();
+  if (currentPersona()) renderPersonaBadge();
+  else if (S.personaColor) applyPersonaColor(S.personaColor);
 
   if (S.style) {
     document.querySelectorAll('#style-pills .pill').forEach(p => {
@@ -1265,11 +1591,14 @@ document.addEventListener('DOMContentLoaded', () => {
       p.classList.toggle('active', p.dataset.val === S.goldenTime);
     });
   }
-  if (S.revenueLink) {
-    document.getElementById('revenue-link-input').value = S.revenueLink;
-    if (S.revenueLink) document.getElementById('revenue-link-input').classList.add('link-armed');
+  // 개인 관심사 복원
+  if (S.personalContext) {
+    const ta = document.getElementById('personal-context-input');
+    if (ta) ta.value = S.personalContext;
   }
-  document.getElementById('cta-toggle').classList.toggle('on', S.ctaEnabled !== false);
+  if (S.selectedKeyword) {
+    showPersonalContextSection(S.selectedKeyword);
+  }
 
   S.postHistory.forEach((item, i) => {
     addPostHistoryRow();
@@ -1290,15 +1619,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!editor) return;
     if (S.lastResult?.content) {
       editor.commands.setContent(S.lastResult.content);
+      setArticleTitle(S.lastResult.title || '');
       renderShoppingKw(S.lastResult.shopping || {});
-      renderOSMU(S.lastResult.osmu || {});
       updateRevenueScore(S.lastResult.revenue_score || 0, S.lastResult.revenue_match || 'none');
-      // harvest 버튼 활성화
-      ['harvest-btn-title', 'harvest-btn-tags'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.disabled = false;
-      });
-
       if (S.lastResult.thumbnails?.length || S.lastResult.body_images?.length) {
         renderThumbGallery(S.lastResult.thumbnails || []);
         renderBodyGallery(S.lastResult.body_images  || []);
@@ -1312,13 +1635,23 @@ document.addEventListener('DOMContentLoaded', () => {
     logTerm('SYSTEM', 'Haru Studio 초기화 완료', 'done');
     if (window.lucide) lucide.createIcons();
 
-    // Cursor lume tracking — updates --bx/--by CSS vars for ::after gradient
+    // Cursor lume tracking — rAF throttle으로 Layout Thrashing 방지
+    // getBoundingClientRect()는 rAF 내부에서 한 번만 실행, 스타일 쓰기도 동일 프레임에 묶음
+    let _lumeRafId = null;
+    let _lumeX = 0, _lumeY = 0, _lumeBtn = null;
     document.addEventListener('mousemove', (e) => {
       const btn = e.target.closest('.btn-sm, .harvest-btn, #gen-btn');
-      if (!btn) return;
-      const r = btn.getBoundingClientRect();
-      btn.style.setProperty('--bx', ((e.clientX - r.left) / r.width  * 100).toFixed(1) + '%');
-      btn.style.setProperty('--by', ((e.clientY - r.top)  / r.height * 100).toFixed(1) + '%');
+      _lumeBtn = btn || null;
+      _lumeX   = e.clientX;
+      _lumeY   = e.clientY;
+      if (_lumeRafId) return;          // 이미 예약된 프레임이 있으면 스킵
+      _lumeRafId = requestAnimationFrame(() => {
+        _lumeRafId = null;
+        if (!_lumeBtn) return;
+        const r = _lumeBtn.getBoundingClientRect();   // read
+        _lumeBtn.style.setProperty('--bx', ((_lumeX - r.left) / r.width  * 100).toFixed(1) + '%');  // write
+        _lumeBtn.style.setProperty('--by', ((_lumeY - r.top)  / r.height * 100).toFixed(1) + '%');  // write
+      });
     });
 
     // 이미지 대시보드 자동 로드
