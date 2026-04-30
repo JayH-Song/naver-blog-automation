@@ -207,6 +207,7 @@ class WriteConfig(BaseModel):
     style: str = ""       # 정보형|경험담|꿀팁|리뷰|Q&A형|비교분석|제품비교분석형 (빈 값 = StrategyManager 자동)
     tone:  str = ""       # 따뜻하고친근한|전문적이고신뢰감있는|감성적이고공감하는|유쾌하고재미있는
     golden_time: str = "auto"  # auto|morning|lunch|night  (auto = 현재 시각 기반 자동)
+    cta_enabled: bool = True
 
 class GenerateRequest(BaseModel):
     persona: Persona
