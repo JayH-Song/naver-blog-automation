@@ -1124,28 +1124,120 @@ def build_system_prompt(
   "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
 }}"""
 
+def _inline_md(text: str) -> str:
+    """인라인 마크다운(**bold**, *italic*) → HTML 인라인 태그 변환."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'\*(.+?)\*',     r'<em>\1</em>',         text)
+    return text
+
+
+def _md_to_html(text: str) -> str:
+    """
+    LLM이 마크다운으로 출력한 내용을 Tiptap 호환 HTML로 변환한다.
+
+    변환 대상:
+      # / ## / ### / #### → <h1>–<h4>
+      - item / * item     → <ul><li>…</li></ul>
+      1. item             → <ol><li>…</li></ol>
+      **bold** / *italic* → <strong> / <em>
+      이미 HTML 태그인 줄  → 그대로 통과
+
+    완전히 HTML로만 구성된 경우(마크다운 패턴 없음)는 변환 없이 반환.
+    """
+    # 마크다운 패턴이 전혀 없으면 즉시 반환
+    if not re.search(r'(?m)^#{1,6}\s|^[-*]\s|\*\*', text):
+        return text
+
+    lines  = text.splitlines()
+    out    = []
+    in_ul  = False
+    in_ol  = False
+
+    def close_ul():
+        nonlocal in_ul
+        if in_ul:
+            out.append('</ul>')
+            in_ul = False
+
+    def close_ol():
+        nonlocal in_ol
+        if in_ol:
+            out.append('</ol>')
+            in_ol = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # ── 제목 ──────────────────────────────────────
+        m_h = re.match(r'^(#{1,4})\s+(.*)', stripped)
+        if m_h:
+            close_ul(); close_ol()
+            lvl  = len(m_h.group(1))
+            body = _inline_md(m_h.group(2).strip())
+            out.append(f'<h{lvl}>{body}</h{lvl}>')
+            continue
+
+        # ── 비순서 목록 ───────────────────────────────
+        m_ul = re.match(r'^[-*]\s+(.*)', stripped)
+        if m_ul:
+            close_ol()
+            if not in_ul:
+                out.append('<ul>')
+                in_ul = True
+            out.append(f'<li>{_inline_md(m_ul.group(1))}</li>')
+            continue
+
+        # ── 순서 목록 ─────────────────────────────────
+        m_ol = re.match(r'^\d+\.\s+(.*)', stripped)
+        if m_ol:
+            close_ul()
+            if not in_ol:
+                out.append('<ol>')
+                in_ol = True
+            out.append(f'<li>{_inline_md(m_ol.group(1))}</li>')
+            continue
+
+        # ── 빈 줄 ────────────────────────────────────
+        if stripped == '':
+            close_ul(); close_ol()
+            continue
+
+        # ── 이미 HTML 태그로 시작하는 줄 ─────────────
+        if stripped.startswith('<'):
+            close_ul(); close_ol()
+            out.append(stripped)
+            continue
+
+        # ── 평문 → <p> ───────────────────────────────
+        close_ul(); close_ol()
+        out.append(f'<p>{_inline_md(stripped)}</p>')
+
+    close_ul(); close_ol()
+    return '\n'.join(out)
+
+
 def _sanitize_content(content: str) -> str:
     """
-    파싱된 HTML content에서 리터럴 \\n 문자열 및 불필요한 공백 정리.
-    Claude가 JSON 이스케이프 없이 \\n을 텍스트로 출력하는 경우 처리.
+    파싱된 content를 Tiptap에 안전하게 로드할 수 있는 HTML로 정리한다.
+
+    처리 순서:
+      1. 리터럴 \\n (JSON 이스케이프 잔재) 제거
+      2. 마크다운 → HTML 변환 (LLM이 마크다운으로 출력한 경우)
+      3. 과도한 태그 간 공백 정리
     """
     if not content:
         return content
 
-    # 1. 리터럴 "\n" 문자열 (두 글자) → 제거 또는 공백
-    #    HTML 태그 사이에 있는 \n\n → 제거
-    content = re.sub(r'\\n\\n', '', content)
-    content = re.sub(r'\\n', ' ', content)
+    # 1. 리터럴 "\\n" 문자열(백슬래시+n, 두 글자) 잔재 제거
+    content = re.sub(r'\\n\\n', '\n', content)   # 이중 → 실제 개행 1개
+    content = re.sub(r'\\n',    '\n', content)   # 단일 → 실제 개행
 
-    # 2. 실제 줄바꿈(\n, \r\n)이 HTML 태그 밖에 있을 때 → 제거
-    #    <p>...</p> 사이의 텍스트 노드에 있는 줄바꿈은 HTML에서 공백으로 처리되므로
-    #    복수 공백/줄바꿈만 정리
-    content = re.sub(r'(\r\n|\r|\n){2,}', '', content)
+    # 2. 마크다운 패턴 감지 시 HTML 변환
+    content = _md_to_html(content)
 
-    # 3. HTML 속성 밖 텍스트 노드의 과도한 공백 정리 (태그 사이)
+    # 3. HTML 블록 태그 사이 과도한 공백 정리 (3칸 이상 → 개행 1개)
     content = re.sub(r'>\s{3,}<', '>\n<', content)
 
-    # 4. 남은 단독 줄바꿈은 그대로 (HTML 들여쓰기 보존)
     return content.strip()
 
 
