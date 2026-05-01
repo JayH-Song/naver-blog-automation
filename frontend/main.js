@@ -998,7 +998,7 @@ function onArticleTitleInput(val) {
   // 모달 제목 칸도 동기화
   const modal = document.getElementById('harvest-title-input');
   if (modal) modal.value = val;
-  reVerifyItem(3);
+  reVerifyItem(2);   // idx 2 = 제목 SEO
 }
 
 async function copyArticleTitle() {
@@ -1022,7 +1022,7 @@ function onHarvestTitleInput(val) {
   if (S.lastResult) S.lastResult.title = val;
   // 에디터 상단 제목 칸도 동기화
   setArticleTitle(val);
-  reVerifyItem(3);
+  reVerifyItem(2);   // idx 2 = 제목 SEO
 }
 
 async function copyHarvestTitle() {
@@ -1176,17 +1176,18 @@ function _updateHarvestSummary() {
   const totalPassed = harvestChecks.reduce((acc, v, i) => acc + ((v || manualOverrides[i]) ? 1 : 0), 0);
   const summary = document.getElementById('harvest-summary');
   if (!summary) return;
+  const total = harvestChecks.length;   // 항목 수 기준 — 배열 길이에서 자동 산출
   if (autoCount === 0 && manualCount === 0) {
     summary.textContent = '⚠ 원고 빌드 완료 후 다시 시도하세요';
     summary.style.color = 'var(--red)';
-  } else if (totalPassed === 4 && manualCount === 0) {
-    summary.textContent = '4 / 4 자동 확인 완료';
+  } else if (totalPassed === total && manualCount === 0) {
+    summary.textContent = `${total} / ${total} 자동 확인 완료`;
     summary.style.color = 'var(--emerald)';
-  } else if (totalPassed === 4) {
-    summary.textContent = `4 / 4 확인 완료 (수동 확인 ${manualCount}개 포함)`;
+  } else if (totalPassed === total) {
+    summary.textContent = `${total} / ${total} 확인 완료 (수동 확인 ${manualCount}개 포함)`;
     summary.style.color = 'var(--amber)';
   } else {
-    summary.textContent = `${totalPassed} / 5 확인 완료`;
+    summary.textContent = `${totalPassed} / ${total} 확인 완료`;
     summary.style.color = 'var(--amber)';
   }
 }
@@ -1223,16 +1224,30 @@ function manualOverrideCheck(idx) {
 function _fix1_forbiddenWords() {
   const text = editor.getText();
   const found = FORBIDDEN.filter(w => text.includes(w));
-  if (!found.length) { reVerifyItem(1); return; }
-  // HTML 텍스트 노드에서만 금지어 제거 (태그 속성은 건드리지 않음)
+  if (!found.length) { reVerifyItem(0); return; }
+
+  // 텍스트 노드 내 금지어 제거.
+  // 패턴: 태그 경계(>…<) 사이의 평문, 또는 태그에 감싸진 금지어(<tag>금지어</tag>)
   let html = editor.getHTML();
   found.forEach(w => {
-    html = html.replace(new RegExp(`(?<=>)([^<]*)${w}([^<]*)(?=<)`, 'g'),
-      (_, pre, post) => `>${pre}${post}<`.slice(1, -1));
+    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // ① 텍스트 노드 내 금지어 — > 와 < 사이
+    html = html.replace(
+      new RegExp(`(>)([^<]*)${escaped}([^<]*)(<)`, 'g'),
+      (_, open, pre, post, close) => `${open}${pre}${post}${close}`
+    );
+
+    // ② 태그로 감싸진 금지어 — <tag ...>금지어</tag> 통째 제거
+    html = html.replace(
+      new RegExp(`<[^>]+>${escaped}</[^>]+>`, 'g'),
+      ''
+    );
   });
+
   editor.commands.setContent(html);
   logTerm('FIX', `금지 접속어 제거 완료 — ${found.join(', ')}`, 'done');
-  reVerifyItem(1);
+  reVerifyItem(0);   // idx 0 = 금지 접속어 항목
 }
 
 function _fix3_faqBlock() {
@@ -1255,7 +1270,7 @@ function _fix3_faqBlock() {
 </div>`;
   editor.commands.setContent(editor.getHTML() + faqHtml);
   logTerm('FIX', 'FAQ 블록(schema.org)을 원고 하단에 삽입했습니다 — 내용을 수정하세요', 'done');
-  reVerifyItem(3);
+  reVerifyItem(1);   // idx 1 = FAQ
 }
 
 function _fix4_seoTitle() {
@@ -1266,7 +1281,7 @@ function _fix4_seoTitle() {
   }
   // S.lastResult.title에 키워드가 이미 포함되어 있으면 에디터 수정 없이 통과
   if (S.lastResult?.title?.includes(keyword)) {
-    reVerifyItem(4);
+    reVerifyItem(2);   // idx 2 = 제목 SEO
     return;
   }
   let html = editor.getHTML();
@@ -1281,7 +1296,7 @@ function _fix4_seoTitle() {
   const curText = headMatch[3].replace(/<[^>]+>/g, '').trim();
   if (curText.includes(keyword)) {
     if (S.lastResult) S.lastResult.title = curText;
-    reVerifyItem(4);
+    reVerifyItem(2);   // idx 2 = 제목 SEO
     return;
   }
   const newTitle = `${keyword} — ${curText}`;
@@ -1289,7 +1304,7 @@ function _fix4_seoTitle() {
   editor.commands.setContent(html);
   if (S.lastResult) S.lastResult.title = newTitle;
   logTerm('FIX', `제목에 키워드를 삽입했습니다 — ${newTitle.slice(0, 40)}`, 'done');
-  reVerifyItem(4);
+  reVerifyItem(2);   // idx 2 = 제목 SEO
 }
 
 /* ── fixCheck 디스패처 ── */
