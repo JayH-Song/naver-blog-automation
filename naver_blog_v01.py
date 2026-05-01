@@ -207,7 +207,6 @@ class WriteConfig(BaseModel):
     style: str = ""       # 정보형|경험담|꿀팁|리뷰|Q&A형|비교분석|제품비교분석형 (빈 값 = StrategyManager 자동)
     tone:  str = ""       # 따뜻하고친근한|전문적이고신뢰감있는|감성적이고공감하는|유쾌하고재미있는
     golden_time: str = "auto"  # auto|morning|lunch|night  (auto = 현재 시각 기반 자동)
-    cta_enabled: bool = True
 
 class GenerateRequest(BaseModel):
     persona: Persona
@@ -215,7 +214,6 @@ class GenerateRequest(BaseModel):
     user_context: Optional[str] = ""   # 키워드 관련 개인 경험/관심사 (선택)
     config: WriteConfig
     post_history: Optional[List[dict]] = []   # [{title, url}]
-    revenue_link: Optional[str] = ""
 
 class ImageGenRequest(BaseModel):
     keyword: str
@@ -1116,11 +1114,13 @@ def build_system_prompt(
 의료법·건강기능식품법 — 단정적 효능 표현 절대 금지
 
 ## 출력 형식 (JSON 필수, 코드블록 없이)
+- 반드시 title → content → tags 순서로 필드를 출력하라
 - content 값 내부의 줄바꿈은 반드시 \\n 으로 이스케이프하라 (JSON 파싱 오류 방지)
-- 큰따옴표(") 는 반드시 \\" 로 이스케이프하라
+- HTML 속성의 큰따옴표는 반드시 &quot; 엔티티로 대체하라 예) href=&quot;url&quot;
+- content 내부 큰따옴표(")는 반드시 \\" 로 이스케이프하라
 {{
   "title": "SEO 최적화된 제목",
-  "content": "<p>HTML 본문 — 줄바꿈은 \\n, 따옴표는 \\"로 이스케이프</p>",
+  "content": "<p>링크: <a href=&quot;https://example.com&quot;>텍스트</a></p>",
   "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
 }}"""
 
@@ -1152,22 +1152,41 @@ def _sanitize_content(content: str) -> str:
 def _content_field_span(text: str):
     """
     content 필드 값의 (start, end) 인덱스를 반환한다.
-    따옴표 감지가 아닌 '다음 필드 이름' 경계 탐지 방식을 사용해
-    HTML 속성의 이스케이프되지 않은 " 에도 안전하다.
+
+    전략 1: title→content→tags 순서를 가정, "tags": 위치를 역방향 탐색
+    전략 2: content가 마지막 필드인 경우 JSON 닫힘(})을 역방향 탐색
+    전략 3: 폴백 — 기존 정방향 경계 탐지
+
+    HTML 속성의 이스케이프되지 않은 " 에 의한 조기 종료를 방지한다.
     """
     start_m = re.search(r'"content"\s*:\s*"', text)
     if not start_m:
         return None, None
-    start = start_m.end()          # 여는 " 다음 위치
+    start = start_m.end()   # content 값 여는 " 다음 위치
 
-    # content 다음에 오는 알려진 필드명 또는 JSON 닫힘 }
-    end_m = re.search(
-        r'",\s*"(?:tags|shopping|revenue_score|run_id)"\s*:|"\s*\}',
-        text[start:],
-    )
-    if not end_m:
-        return None, None
-    return start, start + end_m.start()   # end = 닫는 " 위치
+    # 전략 1: content 뒤에 tags 필드가 있는 경우
+    # finditer 로 모든 매칭을 구하고, start 이후의 가장 앞 매칭 사용
+    _KNOWN_NEXT = re.compile(r'",\s*"(?:tags|shopping|revenue_score|run_id)"\s*:')
+    candidates = [m for m in _KNOWN_NEXT.finditer(text) if m.start() > start]
+    if candidates:
+        return start, candidates[0].start()
+
+    # 전략 2: content가 마지막 필드 — JSON 끝의 "}\s*$ 역방향 탐색
+    close_m = re.search(r'"\s*\n?\s*\}\s*$', text)
+    if close_m and close_m.start() > start:
+        return start, close_m.start()
+
+    # 전략 3: 폴백 (기존 정방향 탐지)
+    end_m = re.search(r'",\s*"[a-z_]+"\s*:|"\s*\}', text[start:])
+    if end_m:
+        return start, start + end_m.start()
+
+    # 전략 4: 응답 잘림 — content 시작부터 텍스트 끝까지
+    # (truncated 상황에서 닫는 } 가 없는 경우)
+    if start < len(text):
+        return start, len(text)
+
+    return None, None
 
 
 def _escape_content_field(text: str) -> str:
@@ -1195,14 +1214,34 @@ def _extract_content_by_boundary(text: str) -> str:
     return raw.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
 
 
-def _robust_parse_article(raw: str) -> dict:
+def _scan_json_string_end(text: str, start: int) -> int:
+    """
+    text[start:] 에서 JSON 문자열의 닫는 따옴표 위치를 문자 단위로 스캔한다.
+    이스케이프(\") 를 올바르게 건너뛴다.
+    닫는 따옴표를 찾지 못하면 -1 을 반환한다.
+    """
+    i = start
+    while i < len(text):
+        c = text[i]
+        if c == '\\':
+            i += 2      # 이스케이프 시퀀스 건너뜀
+            continue
+        if c == '"':
+            return i    # 닫는 " 위치
+        i += 1
+    return -1
+
+
+def _robust_parse_article(raw: str, truncated: bool = False) -> dict:
     """
     Claude 응답에서 JSON을 추출하는 다단계 파서.
 
     1단계: 표준 json.loads
+    1.5단계: content 필드를 문자 단위 스캔으로 추출 후 재조립 파싱
     2단계: content 필드 경계 탐지 → 개행·따옴표 이스케이프 후 재파싱
     3단계: 경계 탐지로 content 직접 추출 (JSON 파싱 포기)
-    4단계: 완전 폴백
+    3.5단계: truncated=True 시 잘린 위치까지 content 강제 추출
+    4단계: 완전 폴백 — 예외 전파
     """
     text = re.sub(r"```json\s*|\s*```", "", raw).strip()
 
@@ -1213,6 +1252,35 @@ def _robust_parse_article(raw: str) -> dict:
         logger.debug("[parse] Stage 1 성공")
         return result
     except json.JSONDecodeError:
+        pass
+
+    # 1.5단계: 문자 단위 스캔으로 content 필드 값 추출 후 재조립
+    # HTML 속성의 이스케이프되지 않은 " 때문에 json.loads가 실패하는 경우 처리
+    try:
+        cm = re.search(r'"content"\s*:\s*"', text)
+        if cm:
+            scan_start = cm.end()
+            scan_end   = _scan_json_string_end(text, scan_start)
+            if scan_end > scan_start:
+                raw_content = text[scan_start:scan_end]
+                # 실제 개행을 \n 으로, 이스케이프되지 않은 " 를 &quot; 로 교체 후 재조립
+                safe_content = raw_content.replace('\r\n', '\n').replace('\r', '')
+                # 이미 이스케이프된 것은 건드리지 않고, 날 따옴표만 &quot; 치환
+                safe_content = re.sub(r'(?<!\\)"', '&quot;', safe_content)
+                # title/tags 부분만 json.loads
+                rebuilt = (
+                    text[:scan_start]
+                    + safe_content.replace('\n', '\\n')
+                    + text[scan_end:]
+                )
+                result = json.loads(rebuilt)
+                # &quot; 를 다시 " 로 복원
+                result["content"] = _sanitize_content(
+                    result.get("content", "").replace('&quot;', '"')
+                )
+                logger.debug("[parse] Stage 1.5 성공 (char-scan rebuild)")
+                return result
+    except Exception:
         pass
 
     # 2단계: content 필드 내부 개행·따옴표 이스케이프 후 재파싱
@@ -1238,9 +1306,35 @@ def _robust_parse_article(raw: str) -> dict:
         logger.debug("[parse] Stage 3 성공 (boundary extraction)")
         return {"title": title, "content": _sanitize_content(content), "tags": tags}
 
+    # 3.5단계: 응답 잘림(max_tokens) — content 시작부터 텍스트 끝까지 강제 추출
+    if truncated:
+        cm = re.search(r'"content"\s*:\s*"', text)
+        if cm:
+            # 잘린 HTML을 그대로 사용 (마지막 불완전 태그 제거)
+            partial = text[cm.end():]
+            # 이스케이프된 \n 을 실제 개행으로, \" 를 "로 복원
+            partial = partial.replace('\\n', '\n').replace('\\"', '"')
+            # 잘린 태그가 있을 수 있으므로 마지막 완전한 블록 레벨 태그까지만 사용
+            last_close = max(
+                partial.rfind('</p>'),
+                partial.rfind('</li>'),
+                partial.rfind('</ul>'),
+                partial.rfind('</ol>'),
+                partial.rfind('</h2>'),
+                partial.rfind('</h3>'),
+                partial.rfind('</blockquote>'),
+            )
+            if last_close > 0:
+                partial = partial[:last_close + partial.index('>', last_close) + 1]
+            if partial.strip():
+                title_m2 = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+                title2   = title_m2.group(1) if title_m2 else ""
+                logger.warning(f"[parse] Stage 3.5 — 잘린 응답 부분 추출, content_len={len(partial)}")
+                return {"title": title2, "content": _sanitize_content(partial), "tags": []}
+
     # 4단계: 완전 폴백 — 조용한 성공 위장 금지, 호출자의 except 블록으로 에러 전파
-    logger.error(f"[_robust_parse_article] 모든 파싱 단계 실패. raw[:300]: {raw[:300]}")
-    raise ValueError(f"원고 JSON 파싱 완전 실패. 응답 일부: {raw[:100]}")
+    logger.error(f"[_robust_parse_article] 모든 파싱 단계 실패.\nraw[:500]:\n{raw[:500]}")
+    raise ValueError(f"원고 JSON 파싱 완전 실패. 응답 일부: {raw[:200]}")
 
 
 async def generate_article(
@@ -1286,8 +1380,12 @@ async def generate_article(
                 follow_redirects=False,  # POST→리디렉션→GET 전환으로 인한 404 방지
             )
             r.raise_for_status()
-            raw    = r.json()["content"][0]["text"]
-            result = _robust_parse_article(raw)
+            resp_body  = r.json()
+            raw        = resp_body["content"][0]["text"]
+            stop_reason = resp_body.get("stop_reason", "")
+            if stop_reason == "max_tokens":
+                logger.warning(f"[generate_article] max_tokens 도달 — 응답 잘림 감지 (attempt {attempt+1})")
+            result = _robust_parse_article(raw, truncated=(stop_reason == "max_tokens"))
 
             # 필수 키 검증
             if not result.get("content"):
@@ -1932,12 +2030,11 @@ async def apply_engagement_modules(
 # 하위 호환 alias
 async def enrich_engagement(
     run_id: str, content_html: str, keyword: str,
-    style: str, cta_enabled: bool,
-    revenue_link: str, shopping: dict,
+    style: str, shopping: dict,
 ) -> tuple[str, list]:
     return await apply_engagement_modules(
         run_id, content_html, keyword,
-        style, cta_enabled, revenue_link, shopping
+        style, shopping
     )
 
 # ────────────────────────────────────────────
@@ -2143,8 +2240,7 @@ async def api_generate(req: GenerateRequest):
         effective_style = (req.config.style or "").strip() or _strategy.get("style", "정보형")
         enriched_content, generated_tags = await enrich_engagement(
             run_id, article_content, req.keyword,
-            effective_style, req.config.cta_enabled,
-            req.revenue_link, shopping,
+            effective_style, shopping,
         )
 
         # tags: Gemini 생성 30개 우선, 없으면 Claude 원고 태그 사용
