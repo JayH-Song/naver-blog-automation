@@ -273,6 +273,17 @@
         <div class="bar"><div class="bar-fill" id="rev-bar-fill"></div></div>
         <span id="high-value-badge" style="display:none" class="badge-high">고수익</span>
       </div>
+      <div id="model-used-badge" style="display:none;align-items:center;gap:4px;
+           background:rgba(3,199,90,.12);border:1px solid rgba(3,199,90,.35);
+           border-radius:20px;padding:2px 10px;font-size:11px;color:#03C75A;
+           white-space:nowrap;cursor:default" title="원고 생성에 사용된 AI 모델">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83
+          M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        <span id="model-used-label">—</span>
+      </div>
       <button class="harvest-btn primary" onclick="openHarvestModal()">블로그로 내보내기</button>
       <button class="harvest-btn img-trigger" onclick="openDrawer('image-drawer')" title="이미지 패널 열기"><i data-lucide="image"></i> 이미지</button>
       <button class="harvest-btn" id="log-toggle-btn" onclick="toggleTerminal()" title="작업 로그">
@@ -284,6 +295,17 @@
 
   <!-- ── LEFT SIDEBAR (bento-card) ── -->
   <div id="left" class="bento-card">
+
+    <!-- Desktop: 사이드바 접기/펴기 토글 바 -->
+    <div class="sidebar-top-bar" id="left-top-bar">
+      <span class="sidebar-top-bar-label"><span class="dot"></span>키워드 &amp; 페르소나</span>
+      <button class="sidebar-toggle-btn" onclick="toggleSidebar('left')" title="패널 접기">
+        <i data-lucide="panel-left-close" id="left-toggle-icon"></i>
+      </button>
+      <div class="sidebar-mini-info" id="left-mini-info">
+        <span id="left-mini-text">—</span>
+      </div>
+    </div>
 
     <!-- Mobile: 드래그 핸들 바 + 닫기 버튼 -->
     <div id="left-mobile-header">
@@ -372,6 +394,12 @@
         <button class="btn-sm pc-skip-btn" onclick="skipPersonalContext()" title="건너뛰기">건너뛰기</button>
       </div>
       <p class="pc-prompt" id="personal-context-prompt"></p>
+      <div class="pc-guide-chips">
+        <button class="pc-chip" onclick="insertPcChip('직접 사용해본 소감: ')">직접 사용해본 소감은?</button>
+        <button class="pc-chip" onclick="insertPcChip('추천 대상: ')">누구에게 추천하나요?</button>
+        <button class="pc-chip" onclick="insertPcChip('아쉬운 점: ')">이런 점이 아쉬웠어요</button>
+        <button class="pc-chip" onclick="insertPcChip('비교해보니 ')">다른 것과 비교하면?</button>
+      </div>
       <textarea
         id="personal-context-input"
         class="field-input pc-textarea"
@@ -379,13 +407,24 @@
         rows="4"
         oninput="savePersonalContext()"
       ></textarea>
-      <div class="pc-hint">입력한 경험·관심사를 글의 도입부와 소제목 각도에 반영하여 더 개인적이고 공감 가는 글을 작성합니다.</div>
+      <div class="pc-hint">경험이 섞일수록 상위 노출 확률이 올라갑니다.</div>
     </div>
 
   </div>
 
   <!-- ── RIGHT SIDEBAR (bento-card) ── -->
   <div id="right" class="bento-card">
+
+    <!-- Desktop: 사이드바 접기/펴기 토글 바 -->
+    <div class="sidebar-top-bar sidebar-top-bar-right" id="right-top-bar">
+      <button class="sidebar-toggle-btn" onclick="toggleSidebar('right')" title="패널 접기">
+        <i data-lucide="panel-right-close" id="right-toggle-icon"></i>
+      </button>
+      <span class="sidebar-top-bar-label">스타일 &amp; 인사이트<span class="dot" style="margin-left:6px"></span></span>
+      <div class="sidebar-mini-info" id="right-mini-info">
+        <span id="right-mini-text">—</span>
+      </div>
+    </div>
 
     <!-- Mobile: 드래그 핸들 바 + 닫기 버튼 -->
     <div id="right-mobile-header">
@@ -429,14 +468,6 @@
       <div class="shop-kw-list" id="shop-kw-list"></div>
     </div>
 
-    <!-- Links -->
-    <div class="panel-section">
-      <div class="section-title"><span><span class="dot" style="background:var(--amber)"></span>내부 링크</span></div>
-      <div class="field-label">내부 링크 목록 <span style="color:var(--text2);font-size:11px">(제목 + URL)</span></div>
-      <div id="post-history-list"></div>
-      <button class="btn-sm" onclick="addPostHistoryRow()" style="margin-top:8px;width:100%">+ 포스팅 추가</button>
-    </div>
-
     <!-- Gen Button -->
     <div class="panel-section">
       <div id="pc-active-badge"></div>
@@ -469,6 +500,25 @@
         <button class="tb-btn" onclick="insertEngagementBlock('summary')" title="핵심요약 삽입">요약</button>
       </div>
     </div>
+    <!-- 콘텐츠 상태 배지 바 -->
+    <div id="editor-status-bar">
+      <div class="status-item" id="seo-score-item">
+        <span class="status-label">SEO</span>
+        <div class="seo-gauge"><div class="seo-gauge-fill" id="seo-gauge-fill"></div></div>
+        <span class="status-value" id="seo-score-value">—</span>
+      </div>
+      <div class="status-sep"></div>
+      <div class="status-item" id="ai-model-status">
+        <span class="status-dot-ai" id="ai-status-dot"></span>
+        <span class="status-label" id="ai-model-name-status">AI 대기중</span>
+      </div>
+      <div class="status-sep"></div>
+      <div class="status-item" id="rag-status-item" style="display:none">
+        <span class="status-dot-green"></span>
+        <span class="status-label" style="color:var(--emerald)">실시간 뉴스 참조 완료</span>
+      </div>
+    </div>
+
     <div id="article-title-bar">
       <div class="article-title-inner">
         <span class="article-title-label">제목 :</span>

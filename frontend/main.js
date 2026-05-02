@@ -34,7 +34,6 @@ const defaultState = {
   style:              '정보 큐레이션',
   tone:               '친근하고 부드럽게',
   goldenTime:         'morning',
-  postHistory:        [],
   personaColor:       '#2cc4a0',
   lastResult:         null,
   currentRunId:       null,
@@ -82,6 +81,7 @@ function _doInitEditor() {
     editorProps: {
       attributes: { class: 'ProseMirror' },
     },
+    onUpdate: () => { if (typeof updateSeoScore === 'function') updateSeoScore(); },
   });
 }
 function initEditor() {
@@ -533,10 +533,36 @@ function renderKeywordCards(list) {
 }
 
 function updateRevenueScore(score, match) {
-  document.getElementById('rev-score-label').textContent = `Score ${score.toFixed(0)}`;
-  document.getElementById('rev-bar-fill').style.width = `${Math.min(score, 100)}%`;
-  const badge = document.getElementById('high-value-badge');
-  badge.style.display = score >= 60 ? 'inline-block' : 'none';
+  const scoreLabel = document.getElementById('rev-score-label');
+  const barFill    = document.getElementById('rev-bar-fill');
+  const badge      = document.getElementById('high-value-badge');
+  if (scoreLabel) scoreLabel.textContent      = `Score ${score.toFixed(0)}`;
+  if (barFill)    barFill.style.width         = `${Math.min(score, 100)}%`;
+  if (badge)      badge.style.display         = score >= 60 ? 'inline-block' : 'none';
+}
+
+/** 원고 생성에 사용된 AI 모델명을 harvest-bar에 표시 */
+function updateModelBadge(modelName) {
+  const wrap  = document.getElementById('model-used-badge');
+  const label = document.getElementById('model-used-label');
+  if (!wrap || !label) return;
+  if (!modelName) { wrap.style.display = 'none'; return; }
+
+  // 모델명 → 짧은 레이블 매핑
+  const SHORT = {
+    'claude-3-5-sonnet-latest':        'Sonnet 3.5',
+    'claude-haiku-4-5-20251001':       'Haiku 4.5',
+    'gpt-4o':                          'GPT-4o',
+    'gpt-4o-mini':                     'GPT-4o mini',
+    'gemini-2.5-pro':                  'Gemini 2.5 Pro',
+    'gemini-2.5-pro-preview-05-06':    'Gemini 2.5 Pro',
+    'gemini-2.5-flash':                'Gemini 2.5 Flash',
+    'gemini-2.5-flash-preview-04-17':  'Gemini 2.5 Flash',
+  };
+  const short = SHORT[modelName] || modelName;
+  label.textContent = short;
+  label.title       = modelName;   // 전체 모델명은 툴팁으로 확인 가능
+  wrap.style.display = 'flex';
 }
 
 /* ─── Pill 선택 ─── */
@@ -551,33 +577,6 @@ function setPill(groupId, el) {
 }
 
 
-/* ─── Post History ─── */
-function addPostHistoryRow() {
-  const list = document.getElementById('post-history-list');
-  const idx  = list.children.length;
-  const row  = document.createElement('div');
-  row.className = 'post-history-item';
-  row.innerHTML = `
-    <input class="post-title-input" placeholder="포스팅 제목" oninput="updatePostHistory(${idx}, 'title', this.value)"/>
-    <input class="post-url-input" placeholder="URL" oninput="updatePostHistory(${idx}, 'url', this.value)"/>
-    <button class="btn-sm" onclick="removePostHistory(${idx}, this.parentElement)" style="padding:4px 7px;font-size:11px">✕</button>
-  `;
-  list.appendChild(row);
-  if (!S.postHistory[idx]) S.postHistory[idx] = { title: '', url: '' };
-  saveState();
-}
-
-function updatePostHistory(idx, field, val) {
-  if (!S.postHistory[idx]) S.postHistory[idx] = {};
-  S.postHistory[idx][field] = val;
-  saveState();
-}
-
-function removePostHistory(idx, rowEl) {
-  S.postHistory.splice(idx, 1);
-  rowEl.remove();
-  saveState();
-}
 
 /* ─── 메인 생성 파이프라인 ─── */
 async function generate() {
@@ -607,7 +606,7 @@ async function generate() {
         tone:        S.tone,
         golden_time: S.goldenTime,
       },
-      post_history:  S.postHistory.filter(p => p.title || p.url),
+      post_history:  [],
     };
 
     logTerm('GEN', `글 빌드 시작 — ${S.selectedKeyword}`);
@@ -622,7 +621,11 @@ async function generate() {
     editor.commands.setContent(result.content || '');
     checkForbiddenWords();
     updateRevenueScore(result.revenue_score || 0, result.revenue_match || 'none');
+    updateModelBadge(result.model_used || '');
+    updateStatusBarModel(result.model_used || '');
+    updateRagStatus(!!(result.news_context_used || result.rag_used));
     renderShoppingKw(result.shopping || {});
+    setTimeout(updateSeoScore, 100);
 
     // run_id 저장 (Phase 3 이미지 생성에 사용)
     S.lastResult  = result;
@@ -631,8 +634,8 @@ async function generate() {
     saveState();
 
     // 이미지 갤러리는 placeholder 유지
-    document.getElementById('thumb-placeholder').style.display = 'block';
-    document.getElementById('body-placeholder').style.display  = 'block';
+    document.getElementById('thumb-placeholder')?.style.setProperty('display', 'block');
+    document.getElementById('body-placeholder')?.style.setProperty('display', 'block');
 
     // Phase 3 이미지 생성 버튼 활성화
     const imgBtn  = document.getElementById('img-gen-trigger-btn');
@@ -649,6 +652,7 @@ async function generate() {
     const msg = e.message || String(e) || '알 수 없는 오류';
     logTerm('ERROR', `생성 실패: ${msg}`, 'error');
     console.error('[generate] 오류:', e);
+    console.error('[generate] 스택:', e.stack);
     if (editor) editor.commands.setContent(`<p style="color:var(--red);padding:16px">⚠ 오류: ${msg}</p>`);
   } finally {
     btn.disabled = false;
@@ -913,6 +917,7 @@ const FUNNEL_LABELS = ['인지','관심','고려','결정','재구매'];
 function renderShoppingKw(shopping) {
   const list   = document.getElementById('shop-kw-list');
   const target = document.getElementById('target-product-area');
+  if (!list || !target) return;
   list.innerHTML = '';
   target.innerHTML = '';
 
@@ -920,7 +925,7 @@ function renderShoppingKw(shopping) {
     target.innerHTML = `<div class="target-product">🎯 추천 상품: <strong>${shopping.target_product}</strong></div>`;
   }
   if (shopping.category) {
-    target.innerHTML += `<div style="font-size:12px;color:var(--text2);padding:4px 10px">${shopping.category}${shopping.search_volume_estimate ? ' · ' + shopping.search_volume_estimate : ''}</div>`;
+    target.innerHTML += `<div style="font-size:11px;color:var(--text2);padding:4px 10px 0">${shopping.category}${shopping.search_volume_estimate ? ' · ' + shopping.search_volume_estimate : ''}</div>`;
   }
 
   // 백엔드가 객체 배열({keyword, funnel_stage, cpc_estimate})로 반환하는 경우와
@@ -932,7 +937,7 @@ function renderShoppingKw(shopping) {
     const cpc    = (typeof kw === 'object' && kw.cpc_estimate) ? kw.cpc_estimate : '';
     const item   = document.createElement('div');
     item.className = 'shop-kw-item';
-    item.innerHTML = `<span class="funnel">${stage}</span><span>${kwText}</span>${cpc ? `<span style="font-size:11px;color:var(--text2);margin-left:auto">${cpc}</span>` : ''}`;
+    item.innerHTML = `<span class="funnel">${stage}</span><span class="kw-text">${kwText}</span>${cpc ? `<span class="kw-cpc">${cpc}</span>` : ''}`;
     list.appendChild(item);
   });
 }
@@ -999,6 +1004,7 @@ function onArticleTitleInput(val) {
   const modal = document.getElementById('harvest-title-input');
   if (modal) modal.value = val;
   reVerifyItem(2);   // idx 2 = 제목 SEO
+  updateSeoScore();
 }
 
 async function copyArticleTitle() {
@@ -1434,7 +1440,8 @@ function clearTerminal() {
 }
 
 function setProgress(pct) {
-  document.getElementById('progress-fill').style.width = `${pct}%`;
+  const el = document.getElementById('progress-fill');
+  if (el) el.style.width = `${pct}%`;
 }
 
 /* ─── WebSocket 연결 ─── */
@@ -1448,6 +1455,23 @@ function connectWS() {
     try {
       const data = JSON.parse(evt.data);
       logTerm(data.step || 'LOG', data.msg || '', data.status || '');
+
+      // ── 실시간 모델 배지 업데이트 ─────────────────────────────────
+      if (data.step === 'WRITE') {
+        const msg = data.msg || '';
+
+        // "[N/6] PROVIDER / model-name 시도 중…" 패턴 → 해당 모델 즉시 표시
+        const tryMatch = msg.match(/\[\d+\/\d+\]\s+\S+\s+\/\s+(.+?)\s+시도 중/);
+        if (tryMatch) {
+          updateModelBadge(tryMatch[1].trim());
+        }
+
+        // "드래프트 완료 [model-name]" 패턴 → 최종 확정 모델 표시
+        const doneMatch = msg.match(/드래프트 완료\s+\[(.+?)\]/);
+        if (doneMatch) {
+          updateModelBadge(doneMatch[1].trim());
+        }
+      }
     } catch(e) {}
   };
   ws.onclose = () => setTimeout(connectWS, 3000);
@@ -1615,14 +1639,6 @@ document.addEventListener('DOMContentLoaded', () => {
     showPersonalContextSection(S.selectedKeyword);
   }
 
-  S.postHistory.forEach((item, i) => {
-    addPostHistoryRow();
-    const rows = document.getElementById('post-history-list').children;
-    if (rows[i]) {
-      rows[i].querySelector('.post-title-input').value = item.title || '';
-      rows[i].querySelector('.post-url-input').value   = item.url   || '';
-    }
-  });
 
   // 테마 복원 (editor 불필요)
   const savedTheme = localStorage.getItem('haru_theme') || 'dark';
@@ -1637,6 +1653,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setArticleTitle(S.lastResult.title || '');
       renderShoppingKw(S.lastResult.shopping || {});
       updateRevenueScore(S.lastResult.revenue_score || 0, S.lastResult.revenue_match || 'none');
+      updateModelBadge(S.lastResult.model_used || '');
       if (S.lastResult.thumbnails?.length || S.lastResult.body_images?.length) {
         renderThumbGallery(S.lastResult.thumbnails || []);
         renderBodyGallery(S.lastResult.body_images  || []);
@@ -1680,3 +1697,173 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('editor-ready', restoreEditorContent, { once: true });
   }
 });
+
+/* ════════════════════════════════════════════════════
+   [A] Collapsible Sidebars
+   ════════════════════════════════════════════════════ */
+const _sidebarState = { left: false, right: false };
+
+function toggleSidebar(side) {
+  const panel  = document.getElementById(side);
+  const icon   = document.getElementById(`${side}-toggle-icon`);
+  if (!panel) return;
+
+  _sidebarState[side] = !_sidebarState[side];
+  const collapsed = _sidebarState[side];
+  panel.classList.toggle('sidebar-collapsed', collapsed);
+
+  // 아이콘 교체
+  if (icon) {
+    icon.setAttribute('data-lucide',
+      collapsed
+        ? (side === 'left' ? 'panel-left-open' : 'panel-right-open')
+        : (side === 'left' ? 'panel-left-close' : 'panel-right-close')
+    );
+    if (window.lucide) lucide.createIcons();
+  }
+
+  // 미니 레이블 업데이트
+  const miniText = document.getElementById(`${side}-mini-text`);
+  if (miniText) {
+    miniText.textContent = side === 'left'
+      ? (S.selectedKeyword || '키워드 없음')
+      : (S.style || 'Custom');
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   [B] Editor Status Bar
+   ════════════════════════════════════════════════════ */
+function updateSeoScore() {
+  const fill  = document.getElementById('seo-gauge-fill');
+  const value = document.getElementById('seo-score-value');
+  if (!fill || !value || !editor) return;
+
+  const title   = (document.getElementById('article-title-input')?.value || '').trim();
+  const content = editor.getText() || '';
+  const kw      = (S.selectedKeyword || '').trim();
+
+  let score = 0;
+  if (title)                              score += 15;
+  if (kw && title.includes(kw))           score += 25;
+  if (content.length >= 2000)             score += 25;
+  else if (content.length >= 1000)        score += 15;
+  if (/faq|자주\s*묻는\s*질문/i.test(editor.getHTML())) score += 20;
+  if (content.length >= 500)              score += 15;
+
+  const pct = Math.min(score, 100);
+  fill.style.width = pct + '%';
+  value.textContent = pct;
+
+  fill.classList.remove('mid', 'low');
+  if (pct < 40)      fill.classList.add('low');
+  else if (pct < 70) fill.classList.add('mid');
+}
+
+function updateStatusBarModel(modelName) {
+  const dot  = document.getElementById('ai-status-dot');
+  const name = document.getElementById('ai-model-name-status');
+  if (!dot || !name) return;
+  if (!modelName) {
+    dot.classList.remove('active');
+    name.textContent = 'AI 대기중';
+    return;
+  }
+  const SHORT = {
+    'claude-haiku-4-5-20251001':       'Haiku 4.5',
+    'claude-3-5-sonnet-latest':        'Sonnet 3.5',
+    'gemini-2.5-flash':                'Gemini Flash',
+    'gemini-2.5-flash-preview-04-17':  'Gemini Flash',
+    'gemini-2.5-pro':                  'Gemini Pro',
+  };
+  dot.classList.add('active');
+  name.textContent = SHORT[modelName] || modelName;
+}
+
+function updateRagStatus(used) {
+  const item = document.getElementById('rag-status-item');
+  if (item) item.style.display = used ? 'flex' : 'none';
+}
+
+/* ════════════════════════════════════════════════════
+   [C] Shopping renderShoppingKw — funnel badges + gauge
+   ════════════════════════════════════════════════════ */
+const FUNNEL_CLASS = {
+  awareness:     'funnel-awareness',
+  interest:      'funnel-interest',
+  consideration: 'funnel-consideration',
+  intent:        'funnel-intent',
+  loyalty:       'funnel-loyalty',
+};
+
+function _funnelBadge(stage) {
+  const s     = (stage || '').toLowerCase();
+  const cls   = FUNNEL_CLASS[s] || 'funnel-default';
+  const label = { awareness:'인지', interest:'관심', consideration:'검토', intent:'구매', loyalty:'충성' }[s] || stage || '—';
+  return `<span class="funnel-badge ${cls}">${label}</span>`;
+}
+
+function _competitionGauge(cpc) {
+  const level = (cpc || '').toLowerCase();
+  const bars = [1, 2, 3].map(n => {
+    let cls = 'empty';
+    if (level === 'low'    && n <= 1) cls = 'filled-low';
+    if (level === 'medium' && n <= 2) cls = 'filled-medium';
+    if (level === 'high'   && n <= 3) cls = 'filled-high';
+    return `<div class="cg-bar ${cls}"></div>`;
+  }).join('');
+  return `<div class="competition-gauge" title="경쟁도: ${cpc || '—'}">${bars}</div>`;
+}
+
+function renderShoppingKw(shopping) {
+  const list   = document.getElementById('shop-kw-list');
+  const target = document.getElementById('target-product-area');
+  if (!list || !target) return;
+  list.innerHTML = '';
+  target.innerHTML = '';
+
+  if (shopping.target_product) {
+    const naverUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(shopping.target_product)}`;
+    target.innerHTML = `
+      <div class="target-product">
+        <span>🎯 추천 상품: <strong>${shopping.target_product}</strong></span>
+        <a class="target-product-link" href="${naverUrl}" target="_blank" rel="noopener" title="네이버 쇼핑 바로가기">
+          <i data-lucide="external-link"></i>
+        </a>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  }
+  if (shopping.category) {
+    target.innerHTML += `<div style="font-size:11px;color:var(--text2);padding:4px 10px 0">${shopping.category}${shopping.search_volume_estimate ? ' · ' + shopping.search_volume_estimate : ''}</div>`;
+  }
+
+  const rawKws = shopping.keywords || [];
+  rawKws.forEach((kw) => {
+    const kwText = (typeof kw === 'object') ? kw.keyword : kw;
+    const stage  = (typeof kw === 'object') ? (kw.funnel_stage || '') : '';
+    const cpc    = (typeof kw === 'object') ? (kw.cpc_estimate || '') : '';
+    const item   = document.createElement('div');
+    item.className = 'shop-kw-item';
+    item.innerHTML = `${_funnelBadge(stage)}<span class="kw-text">${kwText}</span>${_competitionGauge(cpc)}`;
+    list.appendChild(item);
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+/* ════════════════════════════════════════════════════
+   [D] Guide Chip Insert
+   ════════════════════════════════════════════════════ */
+function insertPcChip(text) {
+  const ta = document.getElementById('personal-context-input');
+  if (!ta) return;
+  const start = ta.selectionStart ?? ta.value.length;
+  const end   = ta.selectionEnd   ?? ta.value.length;
+  const before = ta.value.slice(0, start);
+  const after  = ta.value.slice(end);
+  const sep    = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ') ? ' ' : '';
+  ta.value = before + sep + text + after;
+  const pos = (before + sep + text).length;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+  savePersonalContext();
+}
