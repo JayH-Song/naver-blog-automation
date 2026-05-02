@@ -5,7 +5,7 @@
       "src": "naver_blog_v01.py",
       "use": "@vercel/python",
       "config": {
-        "maxDuration": 60
+        "maxDuration": 300
       }
     }
   ],
