@@ -358,7 +358,9 @@ async function uploadImages(files) {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await fetch('/api/images/upload', { method: 'POST', body: fd });
+      const uploadToken = localStorage.getItem('haru_token') || '';
+      const uploadHeaders = uploadToken ? { 'Authorization': `Bearer ${uploadToken}` } : {};
+      const res = await fetch('/api/images/upload', { method: 'POST', body: fd, headers: uploadHeaders });
       if (!res.ok) {
         const err = await res.text();
         throw new Error(`${res.status}: ${err.slice(0,80)}`);

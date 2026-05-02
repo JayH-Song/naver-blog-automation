@@ -43,7 +43,7 @@ def _ensure_deps():
 
 _ensure_deps()
 
-import os, html, json, re, math, asyncio, logging, uuid, glob, time, urllib.parse
+import os, html, json, re, math, asyncio, logging, uuid, glob, time, urllib.parse, base64, hmac, hashlib
 from xml.etree import ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -99,8 +99,7 @@ logger = logging.getLogger("haru")
 # ────────────────────────────────────────────
 ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
-OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY", "")     # DALL-E
-GOOGLE_CLOUD_KEY    = os.getenv("GOOGLE_CLOUD_KEY", "")   # (미사용 — 추후 확장용)
+OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY", "")     # GPT Image
 NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 NAVER_ADS_API_KEY   = os.getenv("NAVER_ADS_API_KEY", "")
@@ -112,9 +111,13 @@ NAVER_ADS_CUSTOMER  = os.getenv("NAVER_ADS_CUSTOMER_ID", "")
 # ────────────────────────────────────────────
 # Content Generation  — Claude Haiku 4.5 (빠른 구어체·AI티 제거)
 MODEL_CLAUDE_HAIKU   = "claude-haiku-4-5-20251001"
+# Fallback Writing    — Gemini 2.5 Pro Preview (만료 시 이 값만 수정)
+MODEL_GEMINI_PRO     = "gemini-2.5-pro-preview-05-06"
 # Data Extraction     — Gemini 2.5 Flash (JSON 추출·분석 초고속)
 MODEL_GEMINI_FLASH   = "gemini-2.5-flash"
 GEMINI_API_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
+# Image Generation    — GPT Image 1 (DALL-E 3 후속)
+MODEL_GPT_IMAGE      = "gpt-image-1"
 
 # Exponential Backoff 공통 설정
 RETRY_MAX   = 3
@@ -125,7 +128,7 @@ RETRY_BASE  = 2.0    # 2 → 4 → 8초
 # ────────────────────────────────────────────
 pipeline_runs: dict[str, dict] = {}   # {run_id: {...}}
 revenue_log:   list[dict]      = []   # [{keyword, score, ts}]
-_persist_lock = asyncio.Lock()        # 동시 파일 쓰기로 인한 JSON 깨짐 방지
+_persist_lock: Optional[asyncio.Lock] = None  # lifespan에서 초기화 (이벤트 루프 시작 후)
 _disk_revenue_cached: bool = False    # 디스크 폴백 1회 실행 후 재스캔 방지 (Cache Stampede)
 
 async def _persist_pipeline_runs() -> None:
@@ -309,7 +312,7 @@ async def calc_revenue_score(keyword: str, base_score: float = 50.0) -> tuple[fl
 # ────────────────────────────────────────────
 async def fetch_naver_searchads(seed_keyword: str) -> list[dict]:
     """시드키워드 → 연관키워드 + 모바일 검색량 Top 7"""
-    import hmac, hashlib, base64
+    # hmac, hashlib, base64 are imported at module level
     excluded = await get_excluded_keywords()
 
     if not all([NAVER_ADS_API_KEY, NAVER_ADS_SECRET, NAVER_ADS_CUSTOMER]):
@@ -598,15 +601,45 @@ def _calc_trend_stats(data: list[dict]) -> dict:
     }
 
 
+async def _datalab_fetch_batch(
+    batch: list[str],
+    headers: dict,
+    start_date: str,
+    end_date: str,
+) -> dict[str, list[dict]]:
+    """DataLab API 단일 배치 호출 — asyncio.gather 병렬 실행용"""
+    body = {
+        "startDate": start_date,
+        "endDate":   end_date,
+        "timeUnit":  "date",
+        "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in batch],
+    }
+    try:
+        r = await http_client.post(
+            "https://openapi.naver.com/v1/datalab/search",
+            headers=headers, json=body, timeout=15,
+        )
+        if r.status_code != 200:
+            logger.warning(f"DataLab 배치 오류 {r.status_code}: {r.text[:200]}")
+            return {}
+        return {
+            item.get("title", ""): item.get("data", [])
+            for item in r.json().get("results", [])
+        }
+    except Exception as e:
+        logger.warning(f"DataLab 배치 요청 실패: {e}")
+        return {}
+
+
 async def fetch_naver_datalab() -> list[dict]:
     """
     블루오션 키워드 발굴 (후보 풀 50개 → Top 10 반환).
 
     선정 순서:
-      1. 후보 풀 전체 DataLab API 조회 (5개씩 배치)
+      1. 후보 풀 전체 DataLab API 조회 — 배치를 asyncio.gather로 병렬 실행
       2. 브랜드·제외 키워드 필터링
       3. 풀 내 peak ratio 기준 순위 부여
-      4. 블루오션 구간 추출: 상위 20% 초과 ~ 하위 20% 미만 (경쟁 회피 + 유입 가능성 확보)
+      4. 블루오션 구간 추출: 상위 20% 초과 ~ 하위 20% 미만
       5. 블루오션 구간 내 상승 추세 키워드 → '황금 키워드' 분류
       6. 황금 키워드 우선, 상승률 높은 순 정렬 → Top 10
     """
@@ -630,27 +663,15 @@ async def fetch_naver_datalab() -> list[dict]:
     ]
     batches = [filtered_candidates[i:i+5] for i in range(0, len(filtered_candidates), 5)]
 
-    # 배치별 DataLab API 호출 (API 제한: 요청당 keywordGroups 최대 5개)
+    # 전체 배치 병렬 실행 — 순차 대비 ~배치 수 배 속도 향상
+    batch_results = await asyncio.gather(*[
+        _datalab_fetch_batch(batch, headers, start_date, end_date)
+        for batch in batches
+    ])
+
     raw_map: dict[str, list[dict]] = {}
-    for batch in batches:
-        body = {
-            "startDate": start_date,
-            "endDate":   end_date,
-            "timeUnit":  "date",
-            "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in batch],
-        }
-        try:
-            r = await http_client.post(
-                "https://openapi.naver.com/v1/datalab/search",
-                headers=headers, json=body, timeout=15
-            )
-            if r.status_code != 200:
-                logger.warning(f"DataLab 배치 오류 {r.status_code}: {r.text[:200]}")
-                continue
-            for item in r.json().get("results", []):
-                raw_map[item.get("title", "")] = item.get("data", [])
-        except Exception as e:
-            logger.warning(f"DataLab 배치 요청 실패: {e}")
+    for partial in batch_results:
+        raw_map.update(partial)
 
     if not raw_map:
         raise HTTPException(502, "DataLab API 응답 없음 — 모든 배치 요청 실패")
@@ -676,18 +697,22 @@ async def fetch_naver_datalab() -> list[dict]:
     golden     = sorted([x for x in blue_ocean if x["is_rising"]], key=lambda x: x["growth_rate"], reverse=True)
     non_golden = sorted([x for x in blue_ocean if not x["is_rising"]], key=lambda x: x["recent_avg"], reverse=True)
 
+    # revenue score도 병렬 계산
+    candidates = (golden + non_golden)[:10]
+    scores = await asyncio.gather(*[
+        calc_revenue_score(item["keyword"], item["recent_avg"])
+        for item in candidates
+    ])
+
     results: list[dict] = []
-    for item in golden + non_golden:
-        kw = item["keyword"]
-        score, match = await calc_revenue_score(kw, item["recent_avg"])
+    for item, (score, match) in zip(candidates, scores):
         results.append({
-            "keyword":       kw,
+            "keyword":       item["keyword"],
             "trend_ratio":   item["peak"],
             "revenue_score": round(score, 1),
             "match_type":    match,
             "excluded":      False,
             "source":        "api",
-            # 블루오션 리포트 필드
             "pool_rank":     item["pool_rank"],
             "pool_size":     pool_size,
             "growth_rate":   item["growth_rate"],
@@ -695,8 +720,6 @@ async def fetch_naver_datalab() -> list[dict]:
             "is_rising":     item["is_rising"],
             "label":         "황금 키워드" if item["is_rising"] else "블루오션",
         })
-        if len(results) >= 10:
-            break
 
     return results
 
@@ -1417,7 +1440,11 @@ def _robust_parse_article(raw: str, truncated: bool = False) -> dict:
                 partial.rfind('</blockquote>'),
             )
             if last_close > 0:
-                partial = partial[:last_close + partial.index('>', last_close) + 1]
+                try:
+                    gt_pos = partial.index('>', last_close)
+                    partial = partial[:gt_pos + 1]
+                except ValueError:
+                    partial = partial[:last_close]
             if partial.strip():
                 title_m2 = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
                 title2   = title_m2.group(1) if title_m2 else ""
@@ -1439,7 +1466,7 @@ async def generate_article(
     news_context: str = "",    # RAG: api_generate에서 주입
     user_context: str = "",    # 사용자 개인 관심사/경험
 ) -> dict:
-    """Claude API를 통한 원고 생성 (Retry 3회 + 강건한 JSON 파서)"""
+    """6단계 다중 모델 폴백(Fallback) 라우팅 — Anthropic→OpenAI→Gemini 순서로 원고 생성"""
     await log_step(run_id, "WRITE", f"글 빌드 시작 — {keyword}")
     if user_context:
         await log_step(run_id, "WRITE", f"개인 관심사 반영 — {user_context[:50]}{'...' if len(user_context) > 50 else ''}", "done")
@@ -1453,31 +1480,115 @@ async def generate_article(
     system_prompt = build_system_prompt(persona, config, revenue_match, keyword, news_context, user_context, post_history)
     user_prompt   = f'키워드: "{keyword}"\n{history_str}\n\n위 키워드로 블로그 포스팅을 작성하세요. 반드시 JSON 형식으로만 응답하세요.'
 
-    for attempt in range(RETRY_MAX):
+    # OpenAI 전용 user_prompt — 글자수 강제 명시 (GPT는 system보다 user 지시를 더 잘 따름)
+    _strategy_for_chars = strategy_mgr.get_strategy_for_config(config)
+    _target_chars       = _strategy_for_chars.get("chars", 2000)
+    user_prompt_openai  = (
+        f'키워드: "{keyword}"\n{history_str}\n\n'
+        f'위 키워드로 블로그 포스팅을 작성하세요. 반드시 JSON 형식으로만 응답하세요.\n\n'
+        f'[필수] content 필드의 텍스트(HTML 태그 제외 순수 글자)는 반드시 {_target_chars}자 이상이어야 합니다. '
+        f'분량이 부족하면 각 소제목 단락을 더 상세히 작성하고 예시와 경험담을 추가하세요.'
+    )
+
+    # ── 6단계 폴백 체인 정의 ──────────────────────────────────────────
+    fallback_chain = [
+        {"provider": "anthropic", "model": "claude-3-5-sonnet-latest"},   # 1순위: 메인
+        {"provider": "anthropic", "model": MODEL_CLAUDE_HAIKU},            # 2순위: 경량
+        {"provider": "openai",    "model": "gpt-4o"},                      # 3순위: 타사 메인
+        {"provider": "openai",    "model": "gpt-4o-mini"},                 # 4순위: 타사 경량
+        {"provider": "gemini",    "model": MODEL_GEMINI_PRO},             # 5순위: 최종 메인
+        {"provider": "gemini",    "model": MODEL_GEMINI_FLASH},            # 6순위: 최종 경량
+    ]
+
+    last_error: Exception | None = None
+
+    for idx, fb in enumerate(fallback_chain):
+        provider = fb["provider"]
+        model    = fb["model"]
+        label    = f"[{idx+1}/6] {provider.upper()} / {model}"
+        await log_step(run_id, "WRITE", f"{label} 시도 중…")
+
         try:
-            r = await http_client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key":         ANTHROPIC_API_KEY,
-                    "anthropic-version":  "2023-06-01",
-                    "content-type":       "application/json",
-                },
-                json={
-                    "model":      MODEL_CLAUDE_HAIKU,
-                    "max_tokens": 8192,
-                    "system":     system_prompt,
-                    "messages":   [{"role": "user", "content": user_prompt}],
-                },
-                timeout=120,
-                follow_redirects=False,  # POST→리디렉션→GET 전환으로 인한 404 방지
-            )
-            r.raise_for_status()
-            resp_body  = r.json()
-            raw        = resp_body["content"][0]["text"]
-            stop_reason = resp_body.get("stop_reason", "")
-            if stop_reason == "max_tokens":
-                logger.warning(f"[generate_article] max_tokens 도달 — 응답 잘림 감지 (attempt {attempt+1})")
-            result = _robust_parse_article(raw, truncated=(stop_reason == "max_tokens"))
+            raw       = ""
+            truncated = False
+
+            # ── Anthropic ────────────────────────────────────────────
+            if provider == "anthropic":
+                r = await http_client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key":         ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type":      "application/json",
+                    },
+                    json={
+                        "model":      model,
+                        "max_tokens": 8192,
+                        "system":     system_prompt,
+                        "messages":   [{"role": "user", "content": user_prompt}],
+                    },
+                    timeout=120,
+                    follow_redirects=False,
+                )
+                r.raise_for_status()
+                resp_body   = r.json()
+                raw         = resp_body["content"][0]["text"]
+                stop_reason = resp_body.get("stop_reason", "")
+                truncated   = (stop_reason == "max_tokens")
+                if truncated:
+                    logger.warning(f"[generate_article] {label}: max_tokens 도달 — 응답 잘림")
+
+            # ── OpenAI ───────────────────────────────────────────────
+            elif provider == "openai":
+                r = await http_client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                        "content-type":  "application/json",
+                    },
+                    json={
+                        "model":                 model,
+                        "max_completion_tokens": 16384,   # GPT-4o 최대치 — 한국어 토크나이저 비효율 보정
+                        "response_format":       {"type": "json_object"},
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user",   "content": user_prompt_openai},  # 글자수 강제 명시 버전
+                        ],
+                    },
+                    timeout=180,   # 토큰 증가로 생성 시간 증가 반영
+                    follow_redirects=False,
+                )
+                r.raise_for_status()
+                resp_body     = r.json()
+                raw           = resp_body["choices"][0]["message"]["content"]
+                finish_reason = resp_body["choices"][0].get("finish_reason", "")
+                truncated     = (finish_reason == "length")
+                if truncated:
+                    logger.warning(f"[generate_article] {label}: finish_reason=length — 응답 잘림")
+
+            # ── Gemini ───────────────────────────────────────────────
+            elif provider == "gemini":
+                combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+                r = await http_client.post(
+                    f"{GEMINI_API_BASE}/{model}:generateContent?key={GEMINI_API_KEY}",
+                    headers={"content-type": "application/json"},
+                    json={
+                        "contents": [{"parts": [{"text": combined_prompt}]}],
+                        "generationConfig": {"maxOutputTokens": 8192},
+                    },
+                    timeout=120,
+                    follow_redirects=False,
+                )
+                r.raise_for_status()
+                resp_body     = r.json()
+                raw           = resp_body["candidates"][0]["content"]["parts"][0]["text"]
+                finish_reason = resp_body["candidates"][0].get("finishReason", "")
+                truncated     = (finish_reason == "MAX_TOKENS")
+                if truncated:
+                    logger.warning(f"[generate_article] {label}: MAX_TOKENS 도달 — 응답 잘림")
+
+            # ── 공통 후처리 ──────────────────────────────────────────
+            result = _robust_parse_article(raw, truncated=truncated)
 
             # 필수 키 검증
             if not result.get("content"):
@@ -1493,16 +1604,47 @@ async def generate_article(
             if _found_political:
                 raise ValueError(f"정치 콘텐츠 금지어 감지 — 재생성 필요: {_found_political[:5]}")
 
-            await log_step(run_id, "WRITE", f"드래프트 완료 [{MODEL_CLAUDE_HAIKU}]", "done")
+            result["model_used"] = model   # 사용한 모델명 — 프론트 표시용
+            await log_step(run_id, "WRITE", f"드래프트 완료 [{model}]", "done")
             return result
 
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text
+            except Exception:
+                pass
+            logger.error(
+                f"[generate_article] {label} HTTP {e.response.status_code} 오류\n"
+                f"  응답 본문: {body[:400]}"
+            )
+            # 400 Fail-Fast 조건: 모든 provider에 공통으로 영향을 주는 결함일 때만 즉시 중단
+            # - 잔액 부족(credit_balance), 인증 오류(authentication_error) → provider-specific → 폴백 허용
+            # - 프롬프트 길이 초과, 파라미터 오류 등은 다른 provider 페이로드와 무관 → 폴백 허용
+            # 결론: 다중 provider 폴백 구조에서 400은 항상 다음 모델 시도
+            if e.response.status_code == 400:
+                _is_billing = any(kw in body.lower() for kw in ("credit", "balance", "billing", "payment"))
+                _log_reason = "잔액 부족" if _is_billing else "400 Bad Request"
+                logger.warning(f"[generate_article] {label} → {_log_reason}, 다음 모델 폴백")
+                await log_step(run_id, "WRITE", f"{label} {_log_reason} — 다음 모델 시도", "warn")
+                last_error = e
+                await asyncio.sleep(1.5)
+                continue
+            # 429·5xx 등: 다음 폴백 모델로 넘어감
+            last_error = e
+            logger.warning(f"[generate_article] {label} → {e.response.status_code}, 다음 모델 폴백")
+            await log_step(run_id, "WRITE", f"{label} 실패 ({e.response.status_code}) — 다음 모델 시도", "warn")
+            await asyncio.sleep(1.5)
+
         except Exception as e:
-            wait = RETRY_BASE ** attempt + random.uniform(0, 1)
-            logger.warning(f"원고 생성 시도 {attempt+1}/{RETRY_MAX} 실패 ({wait:.1f}초 후 재시도): {e}")
-            if attempt == RETRY_MAX - 1:
-                await log_step(run_id, "WRITE", f"드래프트 생성 실패: {e}", "error")
-                raise RuntimeError(f"원고 생성 3회 재시도 최종 실패: {e}")
-            await asyncio.sleep(wait)
+            last_error = e
+            logger.warning(f"[generate_article] {label} 실패: {e}")
+            await log_step(run_id, "WRITE", f"{label} 실패 — 다음 모델 시도", "warn")
+            await asyncio.sleep(1.5)
+
+    # 6개 모두 실패
+    await log_step(run_id, "WRITE", "6단계 폴백 전체 실패", "error")
+    raise RuntimeError(f"원고 생성 6단계 폴백 전체 실패: {last_error}")
 
 # ────────────────────────────────────────────
 # Gemini API — 이미지 키워드 추출
@@ -1579,10 +1721,10 @@ body_images는 본문 흐름에 맞게 3개, infographics는 본문의 핵심 �
     raise RuntimeError("Gemini 이미지 키워드 추출 실패 — API 키 및 모델 상태를 확인하세요")
 
 # ────────────────────────────────────────────
-# DALL-E 3 — 썸네일 생성
+# GPT Image 1 — 썸네일 생성
 # ────────────────────────────────────────────
 async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> list[str]:
-    """DALL-E로 썸네일 2개 생성 → /static/generated/ 저장"""
+    """GPT Image 1으로 썸네일 2개 생성 → /static/generated/ 저장"""
     await log_step(run_id, "THUMB", "썸네일 렌더링 중")
     t   = kw_data.get("thumbnail", {})
     prompt = (
@@ -1602,21 +1744,26 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
                 r = await http_client.post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1792x1024"},
-                    timeout=60,
+                    json={
+                        "model":   MODEL_GPT_IMAGE,
+                        "prompt":  prompt,
+                        "n":       1,
+                        "size":    "1536x1024",   # landscape (gpt-image-1 지원 규격)
+                        "quality": "high",
+                    },
+                    timeout=90,
                 )
                 r.raise_for_status()
-                url = r.json()["data"][0]["url"]
-
-                # 로컬 저장
-                img_r = await http_client.get(url, timeout=60)
+                # GPT Image 1은 b64_json 반환 — URL 다운로드 불필요
+                b64_data = r.json()["data"][0]["b64_json"]
+                img_bytes = base64.b64decode(b64_data)
                 fname = f"{today}_title_{keyword[:10]}_{i+1:02d}.png"
                 fpath = STATIC_DIR / fname
-                await asyncio.to_thread(fpath.write_bytes, img_r.content)
+                await asyncio.to_thread(fpath.write_bytes, img_bytes)
                 saved.append(f"/static/generated/{fname}")
                 break
             except Exception as e:
-                logger.warning(f"DALL-E 썸네일 {i+1} 시도 {attempt+1}/3 실패: {e}")
+                logger.warning(f"GPT Image 썸네일 {i+1} 시도 {attempt+1}/3 실패: {e}")
                 if attempt == 2:
                     saved.append("")   # 빈 URL (스켈레톤 유지)
 
@@ -1624,7 +1771,7 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
     return saved
 
 # ────────────────────────────────────────────
-# DALL-E 3 — 본문 실사 이미지 병렬 생성 (asyncio.gather)
+# GPT Image 1 — 본문 실사 이미지 병렬 생성 (asyncio.gather)
 # ────────────────────────────────────────────
 async def _generate_single_body_image(
     idx: int, bi: dict, keyword: str, alt: str, today: str,
@@ -1640,22 +1787,29 @@ async def _generate_single_body_image(
     )
     for attempt in range(3):
         try:
-            async with sem:   # 동시 DALL-E 요청 최대 2개로 제한 (Rate Limit 방어)
+            async with sem:   # 동시 GPT Image 요청 최대 2개로 제한 (Rate Limit 방어)
                 r = await http_client.post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
+                    json={
+                        "model":   MODEL_GPT_IMAGE,
+                        "prompt":  prompt,
+                        "n":       1,
+                        "size":    "1024x1024",
+                        "quality": "high",
+                    },
                     timeout=90,
                 )
                 r.raise_for_status()
-                img_url = r.json()["data"][0]["url"]
-                img_r   = await http_client.get(img_url, timeout=90)
-            fname   = f"{today}_main_{keyword[:10]}_{idx+1:02d}.png"
-            fpath   = STATIC_DIR / fname
-            await asyncio.to_thread(fpath.write_bytes, img_r.content)
+                # GPT Image 1은 b64_json 반환
+                b64_data  = r.json()["data"][0]["b64_json"]
+                img_bytes = base64.b64decode(b64_data)
+            fname = f"{today}_main_{keyword[:10]}_{idx+1:02d}.png"
+            fpath = STATIC_DIR / fname
+            await asyncio.to_thread(fpath.write_bytes, img_bytes)
             return {"url": f"/static/generated/{fname}", "alt": alt}
         except Exception as e:
-            logger.warning(f"DALL-E 본문이미지 {idx+1} 시도 {attempt+1}/3 실패: {e}")
+            logger.warning(f"GPT Image 본문이미지 {idx+1} 시도 {attempt+1}/3 실패: {e}")
             if attempt < 2:
                 await asyncio.sleep(2 ** attempt)
     return {"url": "", "alt": alt}
@@ -1681,33 +1835,39 @@ async def _generate_single_infographic(
                 r = await http_client.post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
+                    json={
+                        "model":   MODEL_GPT_IMAGE,
+                        "prompt":  prompt,
+                        "n":       1,
+                        "size":    "1024x1024",
+                        "quality": "high",
+                    },
                     timeout=90,
-                    follow_redirects=False,
                 )
                 r.raise_for_status()
-                img_url = r.json()["data"][0]["url"]
-                img_r   = await http_client.get(img_url, timeout=90)
+                # GPT Image 1은 b64_json 반환
+                b64_data  = r.json()["data"][0]["b64_json"]
+                img_bytes = base64.b64decode(b64_data)
             fname = f"{today}_infographic_{keyword[:10]}_{idx+1:02d}.png"
             fpath = STATIC_DIR / fname
-            await asyncio.to_thread(fpath.write_bytes, img_r.content)
+            await asyncio.to_thread(fpath.write_bytes, img_bytes)
             return {"url": f"/static/generated/{fname}", "alt": alt}
         except Exception as e:
-            logger.warning(f"DALL-E 인포그래픽 {idx+1} 시도 {attempt+1}/3 실패: {e}")
+            logger.warning(f"GPT Image 인포그래픽 {idx+1} 시도 {attempt+1}/3 실패: {e}")
             if attempt < 2:
                 await asyncio.sleep(2 ** attempt)
     return {"url": "", "alt": alt}
 
 
 async def generate_body_images_dalle(run_id: str, kw_data: dict, keyword: str) -> list[dict]:
-    """DALL-E 3으로 실사 이미지 3개 + 인포그래픽 2개 asyncio.gather 병렬 생성 (총 5개)"""
+    """GPT Image 1으로 실사 이미지 3개 + 인포그래픽 2개 asyncio.gather 병렬 생성 (총 5개)"""
     await log_step(run_id, "BODY_IMG", "본문 비주얼 병렬 렌더링 중 (실사 3 + 인포그래픽 2)")
     body_items  = kw_data.get("body_images",  [])[:3]   # 실사 이미지 3개
     ig_items    = kw_data.get("infographics", [])[:2]   # 인포그래픽 2개
     alt_texts   = kw_data.get("alt_texts", [])
     today       = datetime.now().strftime("%Y%m%d")
 
-    sem = asyncio.Semaphore(2)   # 동시 DALL-E 요청 최대 2개 (Concurrency Bomb 방어)
+    sem = asyncio.Semaphore(2)   # 동시 GPT Image 요청 최대 2개 (Concurrency Bomb 방어)
 
     # 실사 이미지 태스크 (인덱스 0~2)
     body_tasks = [
@@ -2084,37 +2244,51 @@ async def apply_engagement_modules(
 {result[:3000]}
 
 수정된 완성본 HTML만 반환 (코드블록 없이):"""
-            r = await http_client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key":        ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type":      "application/json",
-                },
-                json={
-                    "model":      MODEL_CLAUDE_HAIKU,
-                    "max_tokens": 8192,
-                    "messages": [{"role": "user", "content": compare_prompt}],
-                },
-                timeout=60,
-                follow_redirects=False,  # POST→리디렉션→GET 전환으로 인한 404 방지
-            )
-            r.raise_for_status()
-            result = r.json()["content"][0]["text"].strip()
-            await log_step(run_id, "ENGAGE", "벤치마크 비교표 삽입 완료")
+
+            # 비교표 생성: Anthropic 1순위 → Gemini Flash 폴백
+            _compare_result = None
+            for _cm, _ch, _cj, _cp in [
+                (  # Anthropic Sonnet
+                    "https://api.anthropic.com/v1/messages",
+                    {"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    {"model": "claude-3-5-sonnet-latest", "max_tokens": 8192,
+                     "messages": [{"role": "user", "content": compare_prompt}]},
+                    "anthropic",
+                ),
+                (  # Gemini Flash 폴백
+                    f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
+                    {"content-type": "application/json"},
+                    {"contents": [{"parts": [{"text": compare_prompt}]}], "generationConfig": {"maxOutputTokens": 8192}},
+                    "gemini",
+                ),
+            ]:
+                try:
+                    _r = await http_client.post(_cm, headers=_ch, json=_cj, timeout=60, follow_redirects=False)
+                    _r.raise_for_status()
+                    if _cp == "anthropic":
+                        _compare_result = _r.json()["content"][0]["text"].strip()
+                    else:
+                        _compare_result = _r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    break
+                except Exception as _ce:
+                    logger.warning(f"비교표 생성 시도 실패 ({_cp}): {_ce}")
+
+            if _compare_result:
+                result = _compare_result
+                await log_step(run_id, "ENGAGE", "벤치마크 비교표 삽입 완료")
         except Exception as e:
             logger.warning(f"제품 비교표 삽입 실패 — 원본 유지: {e}")
 
     await log_step(run_id, "ENGAGE", "콘텐츠 강화 완료", "done")
 
     # ── Module D: 해시태그 30개 — 본문 맨 끝 삽입 ──
+    tags_list: list = []
     try:
         tags_list, hashtag_html = await _build_module_hashtags(run_id, keyword, result)
         if hashtag_html:
             result = result.rstrip() + "\n" + hashtag_html
     except Exception as e:
         logger.warning(f"Module D 삽입 실패 — 원본 유지: {e}")
-        tags_list = []
 
     return _sanitize_content(result), tags_list
 
@@ -2163,7 +2337,8 @@ async def save_backup(run_id: str, keyword: str, title: str, content: str, tags:
 # ════════════════════════════════════════════
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client, pipeline_runs, revenue_log
+    global http_client, pipeline_runs, revenue_log, _persist_lock
+    _persist_lock = asyncio.Lock()
     # 공유 HTTP 클라이언트 초기화
     http_client = httpx.AsyncClient(follow_redirects=True)
     # 영속화된 상태 복원
@@ -2185,7 +2360,8 @@ async def lifespan(app: FastAPI):
     logger.info("Haru Studio Backend 종료")
 
 app = FastAPI(title="Haru Studio API", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(WRITABLE_DIR / "static")), name="static")
 app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
 
@@ -2196,10 +2372,11 @@ HARU_PASSWORD = os.environ.get("HARU_PASSWORD", "")
 if not HARU_PASSWORD:
     import secrets as _secrets
     HARU_PASSWORD = _secrets.token_urlsafe(16)
-    logger.warning(
+    print(
         f"[보안] HARU_PASSWORD 환경변수가 설정되지 않았습니다. "
         f"이번 세션 임시 비밀번호: {HARU_PASSWORD}  "
-        f"(영구 사용 시 .env에 HARU_PASSWORD=<값> 을 추가하세요)"
+        f"(영구 사용 시 .env에 HARU_PASSWORD=<값> 을 추가하세요)",
+        file=sys.stderr
     )
 
 @app.middleware("http")
@@ -2310,7 +2487,7 @@ async def api_generate(req: GenerateRequest):
             await log_step(run_id, "NEWS_RAG", f"뉴스 수집 오류 (스킵): {e}", "warn")
 
         # 2. 원고 생성 — news_context + user_context 주입
-        # ▶ Claude Haiku + 실시간 뉴스 팩트 컨텍스트 + 개인 관심사
+        # ▶ 6단계 폴백 (Sonnet → Haiku → GPT-4o → GPT-4o-mini → Gemini Pro → Gemini Flash)
         article = await generate_article(
             run_id, req.persona, req.keyword,
             req.config, req.post_history, match,
@@ -2362,6 +2539,7 @@ async def api_generate(req: GenerateRequest):
             "thumbnails":      [],
             "body_images":     [],
             "images_status":   "pending",
+            "model_used":      article.get("model_used", ""),  # 실제 사용된 LLM 모델명
         }
 
     except Exception as e:
@@ -2402,7 +2580,7 @@ async def api_generate_images(req: ImageGenFromContentRequest):
             current_content = req.current_content,   # 수정 본문 우선 사용
         )
 
-        # DALL-E 썸네일 2장 + 본문 이미지 5장 병렬 생성
+        # GPT Image 1 — 썸네일 2장 + 본문 이미지 5장 병렬 생성
         await log_step(run_id, "IMG_GEN", "비주얼 병렬 렌더링 중 (7장)...")
         thumb_task = asyncio.create_task(
             generate_thumbnail_dalle(run_id, img_kw, req.keyword)
@@ -2453,7 +2631,7 @@ async def api_strategy():
         "chars":      mode.get("chars", 2000),
         "ad_strategy":mode.get("ad_strategy", ""),
         "model_mix": {
-            "content":  MODEL_CLAUDE_HAIKU,
+            "content":  "claude-3-5-sonnet-latest → " + MODEL_CLAUDE_HAIKU + " (6단계 폴백)",
             "analysis": MODEL_GEMINI_FLASH,
         },
     }
