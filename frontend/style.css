@@ -693,7 +693,7 @@ button:active:not(:disabled),
 }
 .article-title-inner {
   display: flex; align-items: center; gap: 10px;
-  max-width: 760px; margin: 0 auto;
+  max-width: 868px; margin: 0 auto;
   padding: 10px 32px;
 }
 .article-title-label {
@@ -707,8 +707,11 @@ button:active:not(:disabled),
   min-width: 0;
 }
 .article-title-input::placeholder { color: var(--text2); font-weight: 400; font-size: 14px; }
-.article-title-copy-btn { flex-shrink: 0; }
-#editor-wrapper { flex: 1; overflow-y: auto; padding: 32px; max-width: 760px; margin: 0 auto; width: 100%; }
+#article-title-copy-btn { width: 84px; flex-shrink: 0; }
+#editor-wrapper { flex: 1; overflow-y: auto; padding: 32px; max-width: 868px; margin: 0 auto; width: 100%; display: flex; gap: 10px; }
+#body-copy-sidebar { width: 84px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding-top: 2px; }
+#body-copy-sidebar .btn-sm { font-size: 11px; }
+#editor { flex: 1; min-width: 0; }
 .ProseMirror {
   outline: none; color: var(--text0); font-family: var(--font-body);
   font-size: 14.5px; line-height: 1.85; min-height: 400px;

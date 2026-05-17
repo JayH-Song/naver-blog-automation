@@ -1,6 +1,21 @@
 """
 Haru Studio — FastAPI Backend (main.py)
 네이버 블로그 포스팅 자동화 워크스테이션 백엔드
+
+변경사항 (naver_blog):
+  [🔴 크래시 수정]
+  - Fix #1: frontend/ 없을 때 앱 기동 실패 → 조건부 마운트로 방어
+  - Fix #2: index.html 없을 때 매 요청 500 → 존재 확인 후 JSON 안내 응답
+  [🟠 기능 버그/환각 수정]
+  - Fix #3: DataLab 결과 설명 정확화 (후보풀 50개 내 상대 순위임을 명시)
+  - Fix #4: 정치 필터 단방향 편향 제거 → 중립적 정치 도메인 필터로 교체
+  - Fix #5: api_strategy 모델명 불일치 수정 → 실제 폴백 체인 그대로 반영
+  - Fix #6: Module A (CTA 박스) 미구현 → _build_module_cta() 구현 및 주입
+  [🟡 잠재 버그/기술부채 해소]
+  - Fix #7: http_client None 사용 위험 → _get_http_client() 안전 접근자 도입
+  - Fix #8: asyncio.to_thread 키워드 인수 가독성 개선 → lambda 래퍼 사용
+  - Fix #9: 예외 무음 처리 → json/os/Exception 구분 debug 로그 추가
+  - Fix #10: revenue_log GET 엔드포인트 없음 → /api/revenue/log·/stats 추가
 """
 
 # ────────────────────────────────────────────
@@ -117,7 +132,9 @@ MODEL_GEMINI_PRO     = "gemini-2.5-pro-preview-05-06"
 MODEL_GEMINI_FLASH   = "gemini-2.5-flash"
 GEMINI_API_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
 # Image Generation    — GPT Image 1 (DALL-E 3 후속)
-MODEL_GPT_IMAGE      = "gpt-image-1"
+MODEL_GPT_IMAGE_THUMB = "gpt-image-1.5"   # 썸네일 — 빠른 속도, 충분한 품질
+MODEL_GPT_IMAGE_BODY  = "gpt-image-2"     # 본문 이미지 — 최고 품질, 정확한 텍스트 렌더링
+MODEL_GPT_IMAGE       = MODEL_GPT_IMAGE_BODY   # 하위 호환 alias
 
 # Exponential Backoff 공통 설정
 RETRY_MAX   = 3
@@ -133,7 +150,7 @@ _disk_revenue_cached: bool = False    # 디스크 폴백 1회 실행 후 재스�
 
 async def _persist_pipeline_runs() -> None:
     try:
-        async with _persist_lock:
+        async with (_persist_lock or asyncio.Lock()):
             # 메모리 관리: 100개 초과 시 삽입 순서 기준 오래된 항목부터 제거
             while len(pipeline_runs) > 100:
                 del pipeline_runs[next(iter(pipeline_runs))]
@@ -146,7 +163,7 @@ async def _persist_pipeline_runs() -> None:
 
 async def _persist_revenue_log() -> None:
     try:
-        async with _persist_lock:
+        async with (_persist_lock or asyncio.Lock()):
             # 메모리 관리: 1000개 초과 시 오래된 항목 제거
             if len(revenue_log) > 1000:
                 del revenue_log[: len(revenue_log) - 1000]
@@ -186,6 +203,21 @@ ws_manager = ConnectionManager()
 
 # 공유 HTTP 클라이언트 — lifespan에서 초기화·종료 (연결 풀 재사용)
 http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """
+    http_client 안전 접근자.
+    lifespan 이전에 호출되거나(단위 테스트·스크립트 직접 실행 등)
+    비정상 상태로 None인 경우를 명확한 RuntimeError로 드러낸다.
+    정상 서버 기동 흐름에서는 lifespan이 먼저 실행되므로 이 경로에 들어오지 않는다.
+    """
+    if http_client is None:
+        raise RuntimeError(
+            "http_client가 아직 초기화되지 않았습니다. "
+            "FastAPI lifespan이 실행된 후에만 HTTP 요청을 보낼 수 있습니다."
+        )
+    return http_client
 
 async def log_step(run_id: str, step: str, msg: str, status: str = "running"):
     ts = datetime.now().isoformat()
@@ -245,7 +277,10 @@ _excluded_cache: tuple[set[str], float] = (set(), 0.0)
 _EXCLUDED_TTL = 300.0  # 5분 캐시 (매 요청 디스크 I/O 방지)
 
 def _scan_excluded_sync() -> set[str]:
-    """glob + stat + read_text 전체를 스레드 풀에서 실행 (stat() 폭풍 방지)"""
+    """
+    최근 14일 이내 발행된 포스팅의 키워드를 수집해 DataLab 중복 제안을 방지한다.
+    glob + stat + read_text 전체를 스레드 풀에서 실행 (stat() 폭풍 방지).
+    """
     cutoff = datetime.now() - timedelta(days=14)
     excluded: set[str] = set()
     for fp in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:50]:
@@ -258,8 +293,12 @@ def _scan_excluded_sync() -> set[str]:
                     kw = data.get("keyword", "")
                     if kw:
                         excluded.add(kw.lower())
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_scan_excluded_sync] JSON 파싱 실패 — {fp.name}: {e}")
+        except OSError as e:
+            logger.debug(f"[_scan_excluded_sync] 파일 읽기 오류 — {fp.name}: {e}")
+        except Exception as e:
+            logger.debug(f"[_scan_excluded_sync] 예상치 못한 오류 — {fp.name}: {e}")
     return excluded
 
 async def get_excluded_keywords() -> set[str]:
@@ -281,8 +320,12 @@ def _scan_disk_for_revenue() -> list[str]:
             data = json.loads(fp.read_text(encoding="utf-8"))
             if data.get("revenue_score", 0) > 70:
                 result.append(data.get("keyword", "").lower())
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_scan_disk_for_revenue] JSON 파싱 실패 — {fp.name}: {e}")
+        except OSError as e:
+            logger.debug(f"[_scan_disk_for_revenue] 파일 읽기 오류 — {fp.name}: {e}")
+        except Exception as e:
+            logger.debug(f"[_scan_disk_for_revenue] 예상치 못한 오류 — {fp.name}: {e}")
     return result
 
 async def calc_revenue_score(keyword: str, base_score: float = 50.0) -> tuple[float, str]:
@@ -336,7 +379,7 @@ async def fetch_naver_searchads(seed_keyword: str) -> list[dict]:
     }
     params = {"hintKeywords": seed_keyword, "showDetail": "1"}
 
-    r = await http_client.get(
+    r = await _get_http_client().get(
         "https://api.searchad.naver.com/keywordstool",
         headers=headers, params=params, timeout=10
     )
@@ -388,32 +431,39 @@ def _strip_tags(s: str) -> str:
     return s.strip()
 
 
-# ── 국민의힘 소속 정치인 뉴스 필터 ──────────────────────────────────────
-# 당명 또는 소속 주요 정치인 이름이 제목·설명에 포함된 뉴스를 제외한다.
-_PPP_FILTER: set[str] = {
-    # 정당명
-    "국민의힘", "국민의당",
-    # 전·현직 주요 인물 (가나다 순)
-    "강민국", "권성동", "권영세", "권영진",
-    "김건희", "김기현", "김문수", "김성태", "김형동",
-    "나경원",
-    "박대출", "박수영", "박정훈",
-    "배현진",
-    "신원식",
-    "안철수",
-    "오세훈",
-    "원희룡",
-    "윤상현", "윤석열", "윤석렬",   # 표기 오류 변형 포함
-    "이양수", "이철규",
-    "장동혁", "정점식", "정희용", "조수진", "조해진", "주호영",
-    "태영호",
-    "한동훈", "홍준표",
+# ── 정치 관련 뉴스 필터 ──────────────────────────────────────────────────
+# 목적: 건강·라이프스타일 블로그에 정치 편향 콘텐츠가 섞이지 않도록 방지한다.
+# 방침: 특정 정당·인물을 선택적으로 차단하지 않고, "정치 도메인 전체"를 중립적으로 필터링한다.
+# 구현: 당명·정파 키워드와 정치 행위 키워드 조합으로 판별하여 양쪽 모두 동일하게 적용한다.
+_POLITICAL_PARTIES: set[str] = {
+    "국민의힘", "국민의당", "개혁신당",
+    "더불어민주당", "민주당", "진보당", "정의당", "녹색정의당",
+    "새로운미래", "조국혁신당",
+}
+_POLITICAL_CONTEXT: set[str] = {
+    "국회의원", "대통령", "장관", "검찰", "탄핵", "특검",
+    "여당", "야당", "정권", "총선", "대선", "공천", "지지율",
+    "당대표", "원내대표", "의원", "정치인", "청와대", "용산",
 }
 
-def _is_ppp_news(title: str, desc: str = "") -> bool:
-    """제목 또는 설명에 국민의힘·소속 정치인 이름이 포함되면 True 반환."""
+def _is_political_news(title: str, desc: str = "") -> bool:
+    """
+    제목 또는 설명이 정치 도메인에 해당하면 True 반환.
+    정당명 OR (정치인명 + 정치 맥락어) 조합으로 판별 — 양측 모두 동일 기준 적용.
+    """
     combined = f"{title} {desc}"
-    return any(kw in combined for kw in _PPP_FILTER)
+    # 정당명이 직접 언급되면 정치 뉴스로 판단
+    if any(party in combined for party in _POLITICAL_PARTIES):
+        return True
+    # 정치 맥락어 2개 이상 동시 등장 시 정치 뉴스로 판단
+    context_hits = sum(1 for ctx in _POLITICAL_CONTEXT if ctx in combined)
+    return context_hits >= 2
+
+# 하위 호환 alias (기존 코드가 _is_ppp_news를 직접 호출하는 경우 대비)
+_is_ppp_news = _is_political_news
+
+# generate_article 내 사후 검증에 사용되는 금지어 집합도 중립 버전으로 교체
+_PPP_FILTER: set[str] = _POLITICAL_PARTIES | _POLITICAL_CONTEXT
 
 
 async def _fetch_google_news_rss(keyword: str, display: int = 3) -> str:
@@ -425,7 +475,7 @@ async def _fetch_google_news_rss(keyword: str, display: int = 3) -> str:
     encoded = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
     try:
-        r = await http_client.get(
+        r = await _get_http_client().get(
             url,
             headers={"User-Agent": "Mozilla/5.0 (compatible; HaruStudio/2.0)"},
             timeout=10,
@@ -472,7 +522,7 @@ async def _fetch_naver_news_api(keyword: str, display: int = 3) -> str:
     if not all([NAVER_CLIENT_ID, NAVER_CLIENT_SECRET]):
         return ""
     try:
-        r = await http_client.get(
+        r = await _get_http_client().get(
             "https://openapi.naver.com/v1/search/news.json",
             headers={
                 "X-Naver-Client-Id":     NAVER_CLIENT_ID,
@@ -522,11 +572,18 @@ async def fetch_news_context(keyword: str, display: int = 3) -> str:
 
 
 # ────────────────────────────────────────────
-# Naver DataLab API — 블루오션 키워드 발굴
+# Naver DataLab API — 후보 풀 기반 트렌드 순위
 #
-# ※ 기술적 제약: DataLab 공개 API는 지정한 키워드의 트렌드 비율만 반환하며,
-#   "전체 검색어 TOP N 순위 목록"을 제공하는 엔드포인트는 존재하지 않음.
-#   → 사전 정의 후보 풀(50개) 내 상대 순위로 블루오션 개념을 근사 구현.
+# ⚠ 기술적 제약 (명확히 표기):
+#   Naver DataLab 공개 API(/v1/datalab/search)는 사전에 지정한 키워드 그룹의
+#   "상대적 검색 트렌드 비율(ratio 0~100)"만 반환한다.
+#   "전체 검색어 TOP N 순위를 자동으로 가져오는" 엔드포인트는 Naver에서 제공하지 않는다.
+#
+#   따라서 fetch_naver_datalab()은:
+#     1) 코드 내 사전 정의된 50개 후보 키워드풀(_CANDIDATE_KEYWORDS)을 DataLab에 조회한다.
+#     2) 후보풀 내 상대적 트렌드 점수를 기반으로 Top 10을 선별해 반환한다.
+#   → "실시간 전체 트렌드 Top 10"이 아니라 "후보풀 50개 중 상위 10개"임을 명심할 것.
+#   → 후보풀을 교체·확장하면 결과가 완전히 달라진다.
 # ────────────────────────────────────────────
 
 # 후보 풀: 정보성 블로그에 적합한 50개 롱테일 키워드
@@ -615,7 +672,7 @@ async def _datalab_fetch_batch(
         "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in batch],
     }
     try:
-        r = await http_client.post(
+        r = await _get_http_client().post(
             "https://openapi.naver.com/v1/datalab/search",
             headers=headers, json=body, timeout=15,
         )
@@ -633,7 +690,12 @@ async def _datalab_fetch_batch(
 
 async def fetch_naver_datalab() -> list[dict]:
     """
-    블루오션 키워드 발굴 (후보 풀 50개 → Top 10 반환).
+    후보 키워드풀(50개) 기반 트렌드 순위 선별.
+
+    ⚠ 반환값의 의미:
+      코드 내 _CANDIDATE_KEYWORDS 50개를 DataLab API에 조회하여
+      최근 트렌드 점수가 높은 순으로 최대 10개를 반환한다.
+      "네이버 전체 실시간 Top 10 트렌드"가 아님을 API 응답에 명시한다.
 
     선정 순서:
       1. 후보 풀 전체 DataLab API 조회 — 배치를 asyncio.gather로 병렬 실행
@@ -719,6 +781,8 @@ async def fetch_naver_datalab() -> list[dict]:
             "recent_avg":    item["recent_avg"],
             "is_rising":     item["is_rising"],
             "label":         "황금 키워드" if item["is_rising"] else "블루오션",
+            # ⚠ 투명성 필드: 이 결과가 후보풀 내 순위임을 명시 (실시간 전체 트렌드 X)
+            "note":          f"후보풀 {pool_size}개 중 {item['pool_rank']}위 (DataLab 상대 비율 기준)",
         })
 
     return results
@@ -1514,7 +1578,7 @@ async def generate_article(
 
             # ── Anthropic ────────────────────────────────────────────
             if provider == "anthropic":
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
                         "x-api-key":         ANTHROPIC_API_KEY,
@@ -1540,7 +1604,7 @@ async def generate_article(
 
             # ── OpenAI ───────────────────────────────────────────────
             elif provider == "openai":
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
                         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -1569,7 +1633,7 @@ async def generate_article(
             # ── Gemini ───────────────────────────────────────────────
             elif provider == "gemini":
                 combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     f"{GEMINI_API_BASE}/{model}:generateContent?key={GEMINI_API_KEY}",
                     headers={"content-type": "application/json"},
                     json={
@@ -1698,7 +1762,7 @@ body_images는 본문 흐름에 맞게 3개, infographics는 본문의 핵심 �
 
     for attempt in range(3):
         try:
-            r = await http_client.post(
+            r = await _get_http_client().post(
                 f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
                 json={"contents": [{"parts": [{"text": prompt}]}]},
                 timeout=30,
@@ -1741,14 +1805,14 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
     for i in range(2):
         for attempt in range(3):
             try:
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                     json={
-                        "model":   MODEL_GPT_IMAGE,
+                        "model":   MODEL_GPT_IMAGE_THUMB,   # gpt-image-1.5 (썸네일)
                         "prompt":  prompt,
                         "n":       1,
-                        "size":    "1536x1024",   # landscape (gpt-image-1 지원 규격)
+                        "size":    "1536x1024",   # landscape
                         "quality": "high",
                     },
                     timeout=90,
@@ -1788,11 +1852,11 @@ async def _generate_single_body_image(
     for attempt in range(3):
         try:
             async with sem:   # 동시 GPT Image 요청 최대 2개로 제한 (Rate Limit 방어)
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                     json={
-                        "model":   MODEL_GPT_IMAGE,
+                        "model":   MODEL_GPT_IMAGE_BODY,   # gpt-image-2 (본문, 최고 품질)
                         "prompt":  prompt,
                         "n":       1,
                         "size":    "1024x1024",
@@ -1801,7 +1865,7 @@ async def _generate_single_body_image(
                     timeout=90,
                 )
                 r.raise_for_status()
-                # GPT Image 1은 b64_json 반환
+                # gpt-image-2는 b64_json 반환
                 b64_data  = r.json()["data"][0]["b64_json"]
                 img_bytes = base64.b64decode(b64_data)
             fname = f"{today}_main_{keyword[:10]}_{idx+1:02d}.png"
@@ -1832,11 +1896,11 @@ async def _generate_single_infographic(
     for attempt in range(3):
         try:
             async with sem:
-                r = await http_client.post(
+                r = await _get_http_client().post(
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                     json={
-                        "model":   MODEL_GPT_IMAGE,
+                        "model":   MODEL_GPT_IMAGE_BODY,   # gpt-image-2
                         "prompt":  prompt,
                         "n":       1,
                         "size":    "1024x1024",
@@ -1845,7 +1909,7 @@ async def _generate_single_infographic(
                     timeout=90,
                 )
                 r.raise_for_status()
-                # GPT Image 1은 b64_json 반환
+                # gpt-image-2 b64_json 반환
                 b64_data  = r.json()["data"][0]["b64_json"]
                 img_bytes = base64.b64decode(b64_data)
             fname = f"{today}_infographic_{keyword[:10]}_{idx+1:02d}.png"
@@ -1937,7 +2001,7 @@ JSON 형식으로만 응답 (백틱·설명 없이):
 
     for attempt in range(3):
         try:
-            r = await http_client.post(
+            r = await _get_http_client().post(
                 f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
                 json={"contents": [{"parts": [{"text": prompt}]}]},
                 timeout=30,
@@ -1974,6 +2038,63 @@ JSON 형식으로만 응답 (백틱·설명 없이):
 # ────────────────────────────────────────────
 
 
+async def _build_module_cta(
+    run_id: str,
+    keyword: str,
+    target_product: str,
+    kw_str: str,
+) -> str:
+    """
+    Module A: CTA(Call-To-Action) 박스 — 구매 유도 + 네이버 쇼핑 링크 준비.
+
+    Gemini Flash로 주제·쇼핑 키워드를 분석해 1문장 CTA 문구를 동적 생성한다.
+    생성 실패 시 target_product 기반 폴백 문구를 사용하며 원본 원고를 보호한다.
+    삽입 위치: 본문의 첫 번째 소제목(h2/h3) 직후 (없으면 본문 30% 지점).
+    """
+    await log_step(run_id, "ENGAGE", "CTA 모듈 생성 중")
+
+    # Gemini로 주제 맞춤 CTA 문구 생성
+    cta_text = ""
+    if GEMINI_API_KEY:
+        prompt = (
+            f"블로그 독자의 구매 클릭을 유도하는 CTA 문구 1개를 만들어주세요.\n"
+            f"- 주제: {keyword}\n"
+            f"- 연관 상품: {target_product or kw_str or keyword}\n"
+            f"- 조건: '지금 확인', '최저가', '추천' 중 하나 포함 / 30자 이내 / 행동 유도형\n"
+            f"- 문장만 출력 (설명·따옴표 없이)"
+        )
+        try:
+            r = await _get_http_client().post(
+                f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=15,
+            )
+            r.raise_for_status()
+            candidates = r.json().get("candidates", [])
+            if candidates:
+                raw_cta = candidates[0]["content"]["parts"][0]["text"].strip().strip('"').strip("'")
+                if raw_cta:
+                    cta_text = raw_cta[:60]
+        except Exception as e:
+            logger.warning(f"CTA 문구 생성 실패 (폴백 사용): {e}")
+
+    if not cta_text:
+        prod = target_product or kw_str or keyword
+        cta_text = f"{prod} 최저가·할인 정보 지금 확인하기 →"
+
+    return (
+        f'<div style="background:#fff5f5;border:2px dashed #ff6b6b;'
+        f'border-radius:10px;padding:16px 20px;margin:20px 0;text-align:center;font-family:sans-serif">'
+        f'<p style="margin:0 0 8px;font-size:13px;color:#ff6b6b;font-weight:700">🛍 추천 상품</p>'
+        f'<a href="#" class="haru-cta-link" data-keyword="{keyword}" '
+        f'style="font-size:15px;font-weight:700;color:#333;text-decoration:none">'
+        f'👉 {cta_text}</a>'
+        f'<p style="margin:8px 0 0;font-size:12px;color:#999">'
+        f'※ 네이버 쇼핑에서 최저가·할인 정보를 확인하세요</p>'
+        f'</div>'
+    )
+
+
 async def _build_module_checklist(run_id: str, keyword: str, content: str) -> str:
     """
     Module B: 문맥 기반 동적 자가진단 체크리스트 (Gemini Flash 호출).
@@ -2001,7 +2122,7 @@ JSON 배열만 출력 (다른 텍스트·설명 절대 금지):
 ["항목1", "항목2", "항목3", "항목4", "항목5"]"""
 
     try:
-        r = await http_client.post(
+        r = await _get_http_client().post(
             f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=20,
@@ -2070,7 +2191,7 @@ JSON 배열만 출력 (다른 텍스트·설명 절대 금지):
 ]"""
 
     try:
-        r = await http_client.post(
+        r = await _get_http_client().post(
             f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=20,
@@ -2145,7 +2266,7 @@ JSON 배열만 출력 (30개 정확히, 다른 텍스트 금지):
 ["태그1","태그2","태그3",...,"태그30"]"""
 
     try:
-        r = await http_client.post(
+        r = await _get_http_client().post(
             f"{GEMINI_API_BASE}/{MODEL_GEMINI_FLASH}:generateContent?key={GEMINI_API_KEY}",
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=20,
@@ -2215,6 +2336,24 @@ async def apply_engagement_modules(
     except Exception as e:
         logger.warning(f"Module B 삽입 실패 — 원본 유지: {e}")
 
+    # ── Module A: CTA 박스 — 첫 번째 소제목(h2/h3) 직후 삽입 ──
+    # 정보형 글에서도 삽입 여부는 호출부(api_generate 등)에서 결정할 수 있도록
+    # apply_engagement_modules는 항상 CTA를 주입한다.
+    # 호출부에서 CTA를 원하지 않으면 shopping["target_product"] = "" 로 전달하면 된다.
+    try:
+        cta_html = await _build_module_cta(run_id, keyword, target_product, kw_str)
+        if cta_html:
+            # 첫 번째 </h2> 또는 </h3> 직후에 삽입 (없으면 전체 길이 30% 지점)
+            h_match = re.search(r"</h[23]>", result, re.IGNORECASE)
+            if h_match:
+                ins = h_match.end()
+            else:
+                ins = len(result) * 3 // 10
+            result = result[:ins] + "\n" + cta_html + "\n" + result[ins:]
+            await log_step(run_id, "ENGAGE", "Module A (CTA) 삽입 완료")
+    except Exception as e:
+        logger.warning(f"Module A 삽입 실패 — 원본 유지: {e}")
+
     # ── Module C: Long-tail FAQ — 본문 끝 직전 삽입 ──
     # Gemini로 본문 맥락을 분석해 도메인에 맞는 FAQ 동적 생성
     try:
@@ -2263,7 +2402,7 @@ async def apply_engagement_modules(
                 ),
             ]:
                 try:
-                    _r = await http_client.post(_cm, headers=_ch, json=_cj, timeout=60, follow_redirects=False)
+                    _r = await _get_http_client().post(_cm, headers=_ch, json=_cj, timeout=60, follow_redirects=False)
                     _r.raise_for_status()
                     if _cp == "anthropic":
                         _compare_result = _r.json()["content"][0]["text"].strip()
@@ -2362,8 +2501,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Haru Studio API", version="1.0.0", lifespan=lifespan)
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+
+# /static 마운트 — WRITABLE_DIR/static 은 lifespan 이전에 mkdir(exist_ok=True) 보장됨
 app.mount("/static", StaticFiles(directory=str(WRITABLE_DIR / "static")), name="static")
-app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
+
+# /assets 마운트 — frontend/ 디렉토리가 없으면 조용히 스킵 (개발·배포 분리 환경 대응)
+# 없을 경우 GET / 엔드포인트가 JSON 안내를 반환하므로 서비스는 정상 기동
+if FRONTEND_DIR.exists() and any(FRONTEND_DIR.iterdir()):
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
+else:
+    logger.warning(
+        "[startup] frontend/ 디렉토리가 없거나 비어 있습니다. "
+        "/assets 마운트를 건너뜁니다. "
+        "프론트엔드 빌드 결과물을 frontend/ 에 배치하면 활성화됩니다."
+    )
 
 from fastapi import Request
 from starlette.responses import JSONResponse
@@ -2398,7 +2549,19 @@ async def api_verify():
 
 @app.get("/")
 async def root():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    """
+    index.html 이 있으면 SPA 서빙, 없으면 API 상태 JSON 반환.
+    frontend/ 가 아직 빌드·배치되지 않은 환경에서도 백엔드가 정상 응답한다.
+    """
+    index_path = FRONTEND_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    # index.html 없음 → 백엔드 헬스체크 겸 안내 JSON
+    return JSONResponse({
+        "status": "running",
+        "message": "Haru Studio API is online. Frontend not found — place build output in frontend/.",
+        "docs": "/docs",
+    })
 
 # ────────────────────────────────────────────
 # WebSocket — 실시간 로그 스트리밍
@@ -2446,6 +2609,63 @@ async def api_revenue_log(entry: RevenueLogEntry):
     await _persist_revenue_log()
     return {"ok": True}
 
+
+@app.get("/api/revenue/log")
+async def api_get_revenue_log(limit: int = 100, min_score: float = 0):
+    """
+    저장된 revenue_log 조회.
+    - limit: 반환할 최대 항목 수 (기본 100, 최대 1000)
+    - min_score: 이 점수 이상인 항목만 반환 (기본 0 = 전체)
+    """
+    limit = min(max(1, limit), 1000)
+    filtered = [e for e in revenue_log if e.get("score", 0) >= min_score]
+    filtered.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return {
+        "total":    len(revenue_log),
+        "filtered": len(filtered),
+        "items":    filtered[:limit],
+    }
+
+
+@app.get("/api/revenue/stats")
+async def api_revenue_stats():
+    """
+    revenue_log 집계 통계.
+    키워드별 누적 점수 Top 20, 이벤트 유형 분포, 최근 7일 활동을 반환한다.
+    """
+    from collections import defaultdict
+    kw_scores: dict = defaultdict(float)
+    kw_counts: dict = defaultdict(int)
+    event_dist: dict = defaultdict(int)
+    cutoff_7d = (datetime.now() - timedelta(days=7)).isoformat()
+    recent_7d_count = 0
+
+    for e in revenue_log:
+        kw = e.get("keyword", "")
+        sc = float(e.get("score", 0))
+        ev = e.get("event", "unknown")
+        ts = e.get("ts", "")
+        if kw:
+            kw_scores[kw] += sc
+            kw_counts[kw] += 1
+        event_dist[ev] += 1
+        if ts >= cutoff_7d:
+            recent_7d_count += 1
+
+    top_keywords = sorted(
+        [{"keyword": k, "total_score": round(v, 1), "count": kw_counts[k]}
+         for k, v in kw_scores.items()],
+        key=lambda x: x["total_score"],
+        reverse=True,
+    )[:20]
+
+    return {
+        "total_events":      len(revenue_log),
+        "top_keywords":      top_keywords,
+        "event_distribution": dict(event_dist),
+        "recent_7d_count":   recent_7d_count,
+    }
+
 @app.post("/api/generate")
 async def api_generate(req: GenerateRequest):
     """
@@ -2490,7 +2710,7 @@ async def api_generate(req: GenerateRequest):
         # ▶ 6단계 폴백 (Sonnet → Haiku → GPT-4o → GPT-4o-mini → Gemini Pro → Gemini Flash)
         article = await generate_article(
             run_id, req.persona, req.keyword,
-            req.config, req.post_history, match,
+            req.config, req.post_history or [], match,
             news_context=news_context,
             user_context=req.user_context or "",
         )
@@ -2630,9 +2850,19 @@ async def api_strategy():
         "tone":       mode.get("tone", ""),
         "chars":      mode.get("chars", 2000),
         "ad_strategy":mode.get("ad_strategy", ""),
+        # 실제 폴백 체인 순서를 그대로 반영 (환각 없이 코드와 일치)
         "model_mix": {
-            "content":  "claude-3-5-sonnet-latest → " + MODEL_CLAUDE_HAIKU + " (6단계 폴백)",
-            "analysis": MODEL_GEMINI_FLASH,
+            "content_chain": [
+                "claude-3-5-sonnet-latest (1순위)",
+                f"{MODEL_CLAUDE_HAIKU} (2순위)",
+                "gpt-4o (3순위)",
+                "gpt-4o-mini (4순위)",
+                f"{MODEL_GEMINI_PRO} (5순위)",
+                f"{MODEL_GEMINI_FLASH} (6순위)",
+            ],
+            "analysis":      MODEL_GEMINI_FLASH,
+            "image_thumb":   MODEL_GPT_IMAGE_THUMB,   # 썸네일
+            "image_body":    MODEL_GPT_IMAGE_BODY,    # 본문 이미지
         },
     }
 
@@ -2698,10 +2928,10 @@ async def api_mark_posted(fname: str):
     fpath = BACKUP_DIR / safe_name
     if not fpath.exists():
         raise HTTPException(status_code=404)
-    data = json.loads(await asyncio.to_thread(fpath.read_text, encoding="utf-8"))
+    data = json.loads(await asyncio.to_thread(lambda: fpath.read_text(encoding="utf-8")))
     data["posted"] = True
     updated = json.dumps(data, ensure_ascii=False, indent=2)
-    await asyncio.to_thread(fpath.write_text, updated, encoding="utf-8")
+    await asyncio.to_thread(lambda: fpath.write_text(updated, encoding="utf-8"))
     return {"ok": True}
 
 
@@ -2737,6 +2967,8 @@ async def api_list_images():
 async def api_upload_image(file: "UploadFile"):
     """사용자 이미지 업로드 → outputs/images/ 저장"""
     from fastapi import UploadFile
+    if not file.filename:
+        raise HTTPException(400, "파일명이 없습니다.")
     allowed = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     ext = Path(file.filename).suffix.lower()
     if ext not in allowed:

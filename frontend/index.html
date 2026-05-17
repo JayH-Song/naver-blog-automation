@@ -521,14 +521,18 @@
 
     <div id="article-title-bar">
       <div class="article-title-inner">
+        <button class="btn-sm" id="article-title-copy-btn" onclick="copyArticleTitle()">제목 복사</button>
         <span class="article-title-label">제목 :</span>
         <input id="article-title-input" class="article-title-input"
                placeholder="글 빌드 후 자동 입력"
                oninput="onArticleTitleInput(this.value)"/>
-        <button class="btn-sm article-title-copy-btn" onclick="copyArticleTitle()">복사</button>
       </div>
     </div>
     <div id="editor-wrapper">
+      <div id="body-copy-sidebar">
+        <button class="btn-sm" id="article-body-text-btn" onclick="copyArticleBodyText()">본문(텍스트)</button>
+        <button class="btn-sm" id="article-body-html-btn" onclick="copyArticleBodyHtml()">본문(html)</button>
+      </div>
       <div id="editor"></div>
     </div>
   </div>

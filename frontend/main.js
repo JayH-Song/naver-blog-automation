@@ -1023,7 +1023,37 @@ async function copyArticleTitle() {
     document.body.removeChild(tmp);
   }
   logTerm('HARVEST', `제목 복사 완료 — ${val.slice(0, 30)}`, 'done');
-  _flashBtn('article-title-copy-btn');  // 버튼 피드백 재사용 불가(class이므로 직접 처리)
+  _flashBtn('article-title-copy-btn');
+}
+
+async function copyArticleBodyText() {
+  const text = editor?.getText?.().trim();
+  if (!text || text.length < 10) { logTerm('HARVEST', '복사할 본문이 없습니다', 'warn'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch(e) {
+    const tmp = document.createElement('textarea');
+    tmp.value = text; document.body.appendChild(tmp); tmp.select();
+    document.execCommand('copy'); document.body.removeChild(tmp);
+  }
+  logTerm('HARVEST', '본문(텍스트) 복사 완료 ✓', 'done');
+  _flashBtn('article-body-text-btn');
+}
+
+async function copyArticleBodyHtml() {
+  const html = editor?.getHTML?.();
+  if (!html || editor.getText().trim().length < 10) { logTerm('HARVEST', '복사할 본문이 없습니다', 'warn'); return; }
+  try {
+    const blob = new Blob([html], { type: 'text/html' });
+    const plain = new Blob([editor.getText()], { type: 'text/plain' });
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': blob, 'text/plain': plain })]);
+  } catch(e) {
+    const tmp = document.createElement('textarea');
+    tmp.value = html; document.body.appendChild(tmp); tmp.select();
+    document.execCommand('copy'); document.body.removeChild(tmp);
+  }
+  logTerm('HARVEST', '본문(html) 복사 완료 ✓ — 네이버 스마트에디터에 Ctrl+V', 'done');
+  _flashBtn('article-body-html-btn');
 }
 
 function onHarvestTitleInput(val) {
