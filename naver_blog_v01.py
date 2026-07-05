@@ -124,16 +124,21 @@ NAVER_ADS_CUSTOMER  = os.getenv("NAVER_ADS_CUSTOMER_ID", "")
 # ────────────────────────────────────────────
 # 하이브리드 모델 믹스 상수 정의
 # ────────────────────────────────────────────
-# Content Generation  — Claude Haiku 4.5 (빠른 구어체·AI티 제거)
-MODEL_CLAUDE_HAIKU   = "claude-haiku-4-5-20251001"
-# Fallback Writing    — Gemini 2.5 Pro Preview (만료 시 이 값만 수정)
-MODEL_GEMINI_PRO     = "gemini-2.5-pro-preview-05-06"
-# Data Extraction     — Gemini 2.5 Flash (JSON 추출·분석 초고속)
-MODEL_GEMINI_FLASH   = "gemini-2.5-flash"
+# Main Writing        — Claude Sonnet 4.6 (2026-02 출시, 현재 Sonnet 티어 메인 추천)
+MODEL_CLAUDE_SONNET  = "claude-sonnet-4-6"
+# Lightweight Writing — Claude Haiku 4.5 (빠른 구어체·AI티 제거, 2025-10 현재 Haiku 티어 최신)
+#   ⚠ 날짜 suffix 제거: Anthropic이 4.6 세대부터 evergreen ID 채택
+#     (claude-haiku-4-5-20251001 → claude-haiku-4-5 권장)
+MODEL_CLAUDE_HAIKU   = "claude-haiku-4-5"
+# Fallback Writing    — Gemini 3.5 Flash (2026-05-19 GA, 최신 프론티어 모델)
+MODEL_GEMINI_PRO     = "gemini-3.5-flash"
+# Data Extraction     — Gemini 3.5 Flash (JSON 추출·분석 초고속)
+MODEL_GEMINI_FLASH   = "gemini-3.5-flash"
 GEMINI_API_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
-# Image Generation    — GPT Image 1 (DALL-E 3 후속)
-MODEL_GPT_IMAGE_THUMB = "gpt-image-1.5"   # 썸네일 — 빠른 속도, 충분한 품질
-MODEL_GPT_IMAGE_BODY  = "gpt-image-2"     # 본문 이미지 — 최고 품질, 정확한 텍스트 렌더링
+# Image Generation    — GPT Image 2 (2026-04 출시, 현재 OpenAI 이미지 플래그십)
+#   ⚠ gpt-image-1.5 는 Deprecated 예정 (2026-12-01) → 전부 gpt-image-2 로 통합
+MODEL_GPT_IMAGE_THUMB = "gpt-image-2"     # 썸네일 (구: gpt-image-1.5 → gpt-image-2 통합)
+MODEL_GPT_IMAGE_BODY  = "gpt-image-2"     # 본문 이미지 — 최고 품질, 정확한 텍스트 렌더링 (2026-04 최신)
 MODEL_GPT_IMAGE       = MODEL_GPT_IMAGE_BODY   # 하위 호환 alias
 
 # Exponential Backoff 공통 설정
@@ -494,7 +499,7 @@ async def _fetch_google_news_rss(keyword: str, display: int = 3) -> str:
                 break
             raw_title = _strip_tags(item.findtext("title", ""))
             raw_desc  = _strip_tags(item.findtext("description", ""))
-            # 국민의힘 소속 정치인 뉴스 제외
+            # 정치 도메인 뉴스 필터 (양측 모두 동일 기준 적용)
             if _is_ppp_news(raw_title, raw_desc):
                 continue
             # Google RSS 제목 형식: "기사 제목 - 언론사" — 언론사 분리
@@ -547,7 +552,7 @@ async def _fetch_naver_news_api(keyword: str, display: int = 3) -> str:
                 break
             title = _strip_tags(item.get("title", ""))
             desc  = _strip_tags(item.get("description", ""))
-            # 국민의힘 소속 정치인 뉴스 제외
+            # 정치 도메인 뉴스 필터 (양측 모두 동일 기준 적용)
             if _is_ppp_news(title, desc):
                 continue
             date = item.get("pubDate", "")[:16]
@@ -1555,13 +1560,16 @@ async def generate_article(
     )
 
     # ── 6단계 폴백 체인 정의 ──────────────────────────────────────────
+    # ⚠ OpenAI 모델 업데이트 (2026-02 기준):
+    #   gpt-4o / gpt-4o-mini 는 ChatGPT에서 2026-02-13 부로 퇴역·API 접근 종료
+    #   → gpt-5.4 / gpt-5.4-mini 로 교체 (현재 GPT-5.4 세대가 production 표준)
     fallback_chain = [
-        {"provider": "anthropic", "model": "claude-3-5-sonnet-latest"},   # 1순위: 메인
-        {"provider": "anthropic", "model": MODEL_CLAUDE_HAIKU},            # 2순위: 경량
-        {"provider": "openai",    "model": "gpt-4o"},                      # 3순위: 타사 메인
-        {"provider": "openai",    "model": "gpt-4o-mini"},                 # 4순위: 타사 경량
-        {"provider": "gemini",    "model": MODEL_GEMINI_PRO},             # 5순위: 최종 메인
-        {"provider": "gemini",    "model": MODEL_GEMINI_FLASH},            # 6순위: 최종 경량
+        {"provider": "anthropic", "model": MODEL_CLAUDE_SONNET},           # 1순위: 메인 (claude-sonnet-4-6)
+        {"provider": "anthropic", "model": MODEL_CLAUDE_HAIKU},            # 2순위: 경량 (claude-haiku-4-5)
+        {"provider": "openai",    "model": "gpt-5.4"},                     # 3순위: 타사 메인 (구: gpt-4o)
+        {"provider": "openai",    "model": "gpt-5.4-mini"},               # 4순위: 타사 경량 (구: gpt-4o-mini)
+        {"provider": "gemini",    "model": MODEL_GEMINI_PRO},             # 5순위: 최종 메인 (gemini-3.5-flash)
+        {"provider": "gemini",    "model": MODEL_GEMINI_FLASH},            # 6순위: 최종 경량 (gemini-3.5-flash)
     ]
 
     last_error: Exception | None = None
@@ -1809,7 +1817,7 @@ async def generate_thumbnail_dalle(run_id: str, kw_data: dict, keyword: str) -> 
                     "https://api.openai.com/v1/images/generations",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                     json={
-                        "model":   MODEL_GPT_IMAGE_THUMB,   # gpt-image-1.5 (썸네일)
+                        "model":   MODEL_GPT_IMAGE_THUMB,   # gpt-image-2 (썸네일)
                         "prompt":  prompt,
                         "n":       1,
                         "size":    "1536x1024",   # landscape
@@ -2387,10 +2395,10 @@ async def apply_engagement_modules(
             # 비교표 생성: Anthropic 1순위 → Gemini Flash 폴백
             _compare_result = None
             for _cm, _ch, _cj, _cp in [
-                (  # Anthropic Sonnet
+                (  # Anthropic Sonnet 4.6
                     "https://api.anthropic.com/v1/messages",
                     {"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                    {"model": "claude-3-5-sonnet-latest", "max_tokens": 8192,
+                    {"model": MODEL_CLAUDE_SONNET, "max_tokens": 8192,
                      "messages": [{"role": "user", "content": compare_prompt}]},
                     "anthropic",
                 ),
@@ -2853,16 +2861,16 @@ async def api_strategy():
         # 실제 폴백 체인 순서를 그대로 반영 (환각 없이 코드와 일치)
         "model_mix": {
             "content_chain": [
-                "claude-3-5-sonnet-latest (1순위)",
+                f"{MODEL_CLAUDE_SONNET} (1순위)",
                 f"{MODEL_CLAUDE_HAIKU} (2순위)",
-                "gpt-4o (3순위)",
-                "gpt-4o-mini (4순위)",
+                "gpt-5.4 (3순위)",
+                "gpt-5.4-mini (4순위)",
                 f"{MODEL_GEMINI_PRO} (5순위)",
                 f"{MODEL_GEMINI_FLASH} (6순위)",
             ],
             "analysis":      MODEL_GEMINI_FLASH,
-            "image_thumb":   MODEL_GPT_IMAGE_THUMB,   # 썸네일
-            "image_body":    MODEL_GPT_IMAGE_BODY,    # 본문 이미지
+            "image_thumb":   MODEL_GPT_IMAGE_THUMB,   # 썸네일 (gpt-image-2)
+            "image_body":    MODEL_GPT_IMAGE_BODY,    # 본문 이미지 (gpt-image-2)
         },
     }
 
@@ -2941,26 +2949,30 @@ async def api_mark_posted(fname: str):
 @app.get("/api/images")
 async def api_list_images():
     """static/generated + outputs/images 폴더의 이미지 목록 반환"""
-    exts   = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-    images = []
+    exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
-    def collect(folder: Path, category: str):
-        if not folder.exists():
-            return
-        for fp in sorted(folder.rglob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
-            if fp.suffix.lower() in exts:
-                rel = fp.relative_to(WRITABLE_DIR)
-                images.append({
-                    "url":      f"/static-file/{rel.as_posix()}",
-                    "filename": fp.name,
-                    "category": category,
-                    "size":     fp.stat().st_size,
-                    "mtime":    fp.stat().st_mtime,
-                })
+    def _collect_sync() -> list[dict]:
+        """
+        rglob + stat 전체를 스레드 풀에서 실행 — 이미지 수 증가 시
+        수백 ms 이벤트 루프 블로킹을 방지한다 (기술부채 Fix).
+        """
+        results: list[dict] = []
+        for folder, category in [(STATIC_DIR, "generated"), (IMAGE_DIR, "uploaded")]:
+            if not folder.exists():
+                continue
+            for fp in sorted(folder.rglob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
+                if fp.suffix.lower() in exts:
+                    rel = fp.relative_to(WRITABLE_DIR)
+                    results.append({
+                        "url":      f"/static-file/{rel.as_posix()}",
+                        "filename": fp.name,
+                        "category": category,
+                        "size":     fp.stat().st_size,
+                        "mtime":    fp.stat().st_mtime,
+                    })
+        return results[:100]  # 최대 100개
 
-    collect(STATIC_DIR, "generated")
-    collect(IMAGE_DIR,  "uploaded")
-    return images[:100]   # 최대 100개
+    return await asyncio.to_thread(_collect_sync)
 
 
 @app.post("/api/images/upload")
@@ -3026,7 +3038,8 @@ if __name__ == "__main__":
     import webbrowser
     import time
 
-    PORT = 8000
+    import os
+    PORT = int(os.environ.get("PORT", 8000))
     URL  = f"http://localhost:{PORT}"
 
     def open_browser():
@@ -3045,5 +3058,12 @@ if __name__ == "__main__":
             # Chrome 없으면 기본 브라우저로 폴백
             webbrowser.open(URL)
 
-    threading.Thread(target=open_browser, daemon=True).start()
+    # Docker/Railway/Vercel 등 서버 배포 환경인 경우 브라우저 실행 스킵
+    IS_SERVER = (
+        "RAILWAY_STATIC_URL" in os.environ or 
+        "RAILWAY_ENVIRONMENT" in os.environ or 
+        "VERCEL" in os.environ
+    )
+    if not IS_SERVER:
+        threading.Thread(target=open_browser, daemon=True).start()
     uvicorn.run("naver_blog_v01:app", host="0.0.0.0", port=PORT, reload=True)
