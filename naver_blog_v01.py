@@ -124,8 +124,8 @@ NAVER_ADS_CUSTOMER  = os.getenv("NAVER_ADS_CUSTOMER_ID", "")
 # ────────────────────────────────────────────
 # 하이브리드 모델 믹스 상수 정의
 # ────────────────────────────────────────────
-# Main Writing        — Claude Sonnet 4.6 (2026-02 출시, 현재 Sonnet 티어 메인 추천)
-MODEL_CLAUDE_SONNET  = "claude-sonnet-4-6"
+# Main Writing        — Claude Sonnet 5 (2026-06 출시, 현재 Sonnet 티어 최신 추천)
+MODEL_CLAUDE_SONNET  = "claude-sonnet-5"
 # Lightweight Writing — Claude Haiku 4.5 (빠른 구어체·AI티 제거, 2025-10 현재 Haiku 티어 최신)
 #   ⚠ 날짜 suffix 제거: Anthropic이 4.6 세대부터 evergreen ID 채택
 #     (claude-haiku-4-5-20251001 → claude-haiku-4-5 권장)
@@ -1620,13 +1620,12 @@ async def generate_article(
     )
 
     # ── 6단계 폴백 체인 정의 ──────────────────────────────────────────
-    # ⚠ OpenAI 모델 업데이트 (2026-02 기준):
-    #   gpt-4o / gpt-4o-mini 는 ChatGPT에서 2026-02-13 부로 퇴역·API 접근 종료
-    #   → gpt-5.4 / gpt-5.4-mini 로 교체 (현재 GPT-5.4 세대가 production 표준)
+    # ⚠ OpenAI 모델 업데이트 (2026-07 기준):
+    #   gpt-5.4 → gpt-5.5 로 교체 (현재 GPT-5.5 세대가 production 플래그십)
     fallback_chain = [
-        {"provider": "anthropic", "model": MODEL_CLAUDE_SONNET},           # 1순위: 메인 (claude-sonnet-4-6)
+        {"provider": "anthropic", "model": MODEL_CLAUDE_SONNET},           # 1순위: 메인 (claude-sonnet-5)
         {"provider": "anthropic", "model": MODEL_CLAUDE_HAIKU},            # 2순위: 경량 (claude-haiku-4-5)
-        {"provider": "openai",    "model": "gpt-5.4"},                     # 3순위: 타사 메인 (구: gpt-4o)
+        {"provider": "openai",    "model": "gpt-5.5"},                     # 3순위: 타사 메인 (구: gpt-5.4)
         {"provider": "openai",    "model": "gpt-5.4-mini"},               # 4순위: 타사 경량 (구: gpt-4o-mini)
         {"provider": "gemini",    "model": MODEL_GEMINI_PRO},             # 5순위: 최종 메인 (gemini-3.5-flash)
         {"provider": "gemini",    "model": MODEL_GEMINI_FLASH},            # 6순위: 최종 경량 (gemini-3.5-flash)
